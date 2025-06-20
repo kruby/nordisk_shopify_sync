@@ -1,0 +1,3 @@
+shopifyapi
+streamlit
+python-dotenv
