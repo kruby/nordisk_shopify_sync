@@ -93,6 +93,8 @@ for m in selected_product.metafields():
         "value": m.value,
         "type": m.type,
         "sync": m.key in sync_keys,
+        "product_id": selected_product.id,
+        "product_sync_fields": sync_keys,
         "metafield_obj": m
     })
 
@@ -119,7 +121,7 @@ variant_rows = []
 variant_map = {}
 for variant in selected_product.variants:
     variant_map[variant.id] = variant
-    sync_keys = get_sync_keys(variant)
+    variant_sync_keys = get_sync_keys(variant)
     for m in variant.metafields():
         variant_rows.append({
             "product_id": selected_product.id,
@@ -128,7 +130,8 @@ for variant in selected_product.variants:
             "key": m.key,
             "value": m.value,
             "type": m.type,
-            "sync": m.key in sync_keys,
+            "sync": m.key in variant_sync_keys,
+            "variant_sync_fields": variant_sync_keys,
             "metafield_obj": m
         })
 
