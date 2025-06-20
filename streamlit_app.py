@@ -139,21 +139,29 @@ if variant_rows:
     df_v = pd.DataFrame(variant_rows).drop(columns=["metafield_obj"])
     edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key="variant_editor")
 
-    if st.button("✅ Save Variant Changes"):
-        success_count = 0
-        grouped = edited_df_v.groupby("variant_id")
-        for variant_id, rows in grouped:
-            variant = variant_map[variant_id]
-            keys_to_sync = []
-            metafields = variant.metafields()
-            for _, row in rows.iterrows():
-                original = next((m for m in metafields if m.key == row["key"]), None)
-                if original and str(original.value) != str(row["value"]):
-                    original.value = row["value"]
-                    original.type = row["type"]
-                    if original.save():
-                        success_count += 1
-                if row["sync"]:
-                    keys_to_sync.append(row["key"])
-            save_sync_keys(variant, keys_to_sync)
-        st.success(f"✅ Updated {success_count} variant metafields and sync settings.")
+if st.button("✅ Save Variant Changes"):
+    success_count = 0
+    # Prepare a lookup of original variant_rows by (variant_id, key)
+    row_lookup = {
+        (row["variant_id"], row["key"]): row["metafield_obj"]
+        for row in variant_rows
+    }
+
+    grouped = edited_df_v.groupby("variant_id")
+    for variant_id, rows in grouped:
+        variant = variant_map[variant_id]
+        keys_to_sync = []
+        for _, row in rows.iterrows():
+            key = row["key"]
+            original = row_lookup.get((variant_id, key))
+            if original and str(original.value) != str(row["value"]):
+                original.value = row["value"]
+                original.type = row["type"]
+                if original.save():
+                    success_count += 1
+            if row["sync"]:
+                keys_to_sync.append(key)
+
+        save_sync_keys(variant, keys_to_sync)
+
+    st.success(f"✅ Updated {success_count} variant metafields and sync settings.")
