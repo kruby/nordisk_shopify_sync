@@ -122,6 +122,7 @@ for variant in selected_product.variants:
     sync_keys = get_sync_keys(variant)
     for m in variant.metafields():
         variant_rows.append({
+            "product_id": selected_product.id,
             "variant_id": variant.id,
             "variant_title": variant.title,
             "key": m.key,
