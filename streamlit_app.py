@@ -3,6 +3,7 @@ import shopify
 import pandas as pd
 import json
 import time
+from pyactiveresource.connection import ClientError
 
 # --- Shopify Setup ---
 SHOP_URL = st.secrets["STORE_A_URL"]
@@ -27,19 +28,6 @@ def get_all_products():
             break
     return all_products
 
-def get_or_create_metafield(resource, namespace, key):
-    for m in resource.metafields():
-        if m.namespace == namespace and m.key == key:
-            return m
-    m = shopify.Metafield()
-    m.namespace = namespace
-    m.key = key
-    m.value = ""
-    m.type = "single_line_text_field"
-    m.owner_resource = "product" if isinstance(resource, shopify.Product) else "variant"
-    m.owner_id = resource.id
-    return m
-
 def get_sync_keys(resource):
     for m in resource.metafields():
         if m.namespace == SYNC_NAMESPACE and m.key == SYNC_KEY:
@@ -60,6 +48,18 @@ def save_sync_keys(resource, keys):
         meta.type = "json"
     meta.value = json.dumps(keys)
     return meta.save()
+
+def apply_sync_keys_to_category(products, product_type, product_sync_keys, variant_sync_keys):
+    for p in products:
+        if p.product_type == product_type and p.id != selected_product.id:
+            try:
+                save_sync_keys(p, product_sync_keys)
+                for variant in p.variants:
+                    save_sync_keys(variant, variant_sync_keys)
+                    time.sleep(0.6)
+            except Exception:
+                time.sleep(2)
+                save_sync_keys(p, product_sync_keys)
 
 # --- Streamlit App ---
 st.title("🔧 Shopify Product + Variant Metafield Sync Tool")
@@ -93,21 +93,23 @@ show_only_sync = st.checkbox("🔁 Show only synced metafields", value=False)
 # --- Product Metafields ---
 product_fields = []
 sync_keys = get_sync_keys(selected_product)
+existing_fields = {m.key: m for m in selected_product.metafields()}
 
-for m in selected_product.metafields():
-    if not show_only_sync or m.key in sync_keys:
-        product_fields.append({
-            "key": m.key,
-            "value": m.value,
-            "product_id": selected_product.id,
-            "sync": m.key in sync_keys,
-            "metafield_obj": m
-        })
+for key, m in existing_fields.items():
+    if show_only_sync and key not in sync_keys:
+        continue
+    product_fields.append({
+        "key": key,
+        "value": m.value,
+        "product_id": selected_product.id,
+        "sync": key in sync_keys,
+        "metafield_obj": m
+    })
 
 edited_df = None
 if product_fields:
     st.markdown("### 🔍 Product Metafields")
-    st.caption(f"Currently synced fields: {', '.join(sync_keys) if sync_keys else 'None'}")
+    st.caption(f"Currently synced product fields: {', '.join(sync_keys) if sync_keys else 'None'}")
     df = pd.DataFrame(product_fields).drop(columns=["metafield_obj"])
     edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key="product_editor")
 
@@ -118,68 +120,63 @@ variant_map = {}
 variant_sync_map = {}
 
 for variant in selected_product.variants:
-    time.sleep(0.6)  # throttle reads too
+    time.sleep(0.6)
     try:
         variant_map[variant.id] = variant
         variant_sync_keys = get_sync_keys(variant)
         variant_sync_map[variant.id] = variant_sync_keys
-        for m in variant.metafields():
-            if not show_only_sync or m.key in variant_sync_keys:
-                variant_rows.append({
-                    "product_id": selected_product.id,
-                    "variant_id": variant.id,
-                    "variant_title": variant.title,
-                    "key": m.key,
-                    "value": m.value,
-                    "sync": m.key in variant_sync_keys,
-                    "metafield_obj": m
-                })
-    except shopify.ShopifyResource.ClientError as e:
+        existing_fields = {m.key: m for m in variant.metafields()}
+
+        for key, m in existing_fields.items():
+            if show_only_sync and key not in variant_sync_keys:
+                continue
+            variant_rows.append({
+                "variant_id": variant.id,
+                "variant_title": variant.title,
+                "key": key,
+                "value": m.value,
+                "sync": key in variant_sync_keys,
+                "metafield_obj": m
+            })
+    except ClientError as e:
         if '429' in str(e):
             st.warning(f"Rate limit hit while fetching variant {variant.id} — retrying...")
             time.sleep(2)
-            for m in variant.metafields():
-                if not show_only_sync or m.key in variant_sync_keys:
-                    variant_rows.append({
-                        "product_id": selected_product.id,
-                        "variant_id": variant.id,
-                        "variant_title": variant.title,
-                        "key": m.key,
-                        "value": m.value,
-                        "sync": m.key in variant_sync_keys,
-                        "metafield_obj": m
-                    })
 
 edited_df_v = None
 if variant_rows:
-    st.caption("Currently synced variant fields: (click checkbox to toggle)")
+    variant_sync_keys_combined = set()
+    for keys in variant_sync_map.values():
+        variant_sync_keys_combined.update(keys)
+    st.caption(f"Currently synced variant fields: {', '.join(sorted(variant_sync_keys_combined)) if variant_sync_keys_combined else 'None'}")
     df_v = pd.DataFrame(variant_rows).drop(columns=["metafield_obj"])
     edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key="variant_editor")
 
 # --- Unified Save Button ---
+updated_product_sync_keys = []
+updated_variant_sync_keys_combined = set()
+
 if st.button("✅ Save All Changes"):
     success_count = 0
-    # --- Save product metafields ---
+
     if edited_df is not None:
-        updated_sync_keys = []
         for i, row in edited_df.iterrows():
             original = product_fields[i]["metafield_obj"]
-            if str(original.value) != str(row["value"]):
+            if original and str(original.value) != str(row["value"]):
                 original.value = row["value"]
                 try:
                     original.save()
                     time.sleep(0.6)
-                except shopify.ShopifyResource.ClientError as e:
+                except ClientError as e:
                     if '429' in str(e):
                         st.warning("Rate limit hit — retrying...")
                         time.sleep(2)
                         original.save()
             if row["sync"]:
-                updated_sync_keys.append(row["key"])
-        if save_sync_keys(selected_product, updated_sync_keys):
+                updated_product_sync_keys.append(row["key"])
+        if save_sync_keys(selected_product, updated_product_sync_keys):
             st.success("✅ Product metafields and sync fields saved.")
 
-    # --- Save variant metafields ---
     if edited_df_v is not None:
         row_lookup = {
             (row["variant_id"], row["key"]): row["metafield_obj"]
@@ -198,7 +195,7 @@ if st.button("✅ Save All Changes"):
                         if original.save():
                             success_count += 1
                             time.sleep(0.6)
-                    except shopify.ShopifyResource.ClientError as e:
+                    except ClientError as e:
                         if '429' in str(e):
                             st.warning("Rate limited — retrying after short delay...")
                             time.sleep(2)
@@ -206,5 +203,21 @@ if st.button("✅ Save All Changes"):
                 if row["sync"]:
                     keys_to_sync.append(key)
             save_sync_keys(variant, keys_to_sync)
+            updated_variant_sync_keys_combined.update(keys_to_sync)
 
         st.success(f"✅ Updated {success_count} variant metafields and sync settings.")
+
+# --- Apply Sync to Category Button ---
+if st.button("📦 Apply Sync Settings to All in Category"):
+    current_product_keys = get_sync_keys(selected_product)
+    current_variant_keys = set()
+    for v in selected_product.variants:
+        current_variant_keys.update(get_sync_keys(v))
+
+    apply_sync_keys_to_category(
+        products,
+        selected_product.product_type,
+        current_product_keys,
+        list(current_variant_keys)
+    )
+    st.success("✅ Sync settings applied to all products and variants in this category.")
