@@ -4,6 +4,10 @@ import pandas as pd
 import json
 import time
 from pyactiveresource.connection import ClientError
+from update_app import run_update_app
+from update_app import sync_product_fields
+
+
 
 # --- Shopify Setup ---
 SHOP_URL = st.secrets["STORE_A_URL"]
@@ -221,3 +225,20 @@ if st.button("📦 Apply Sync Settings to All in Category"):
         list(current_variant_keys)
     )
     st.success("✅ Sync settings applied to all products and variants in this category.")
+
+st.markdown("---")
+st.markdown("## 🌍 Cross-Store Sync")
+
+if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
+    results = sync_product_fields(selected_product)
+    if results:
+        st.subheader("Cross-Store Sync Results")
+        for shop, result in results.items():
+            st.markdown(f"**{shop}**")
+            if "error" in result:
+                st.error(result["error"])
+            else:
+                for key, status in result.items():
+                    st.write(f"{key}: {status}")
+
+
