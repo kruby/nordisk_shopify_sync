@@ -66,20 +66,17 @@ def sync_product_fields(primary_product):
         st.warning("Primary product has no variant barcode set.")
         return
 
-    # Retrieve sync keys from the sync_fields metafield
     sync_keys = get_sync_keys(primary_product)
 
-    # Get all metafields (including unstructured)
     all_metafields = shopify.Metafield.find(
-    resource_id=primary_product.id, resource_type="product"
+        resource_id=primary_product.id,
+        resource_type="product"
     )
     primary_metafields = [m for m in all_metafields if m.key in sync_keys]
 
-    # ✅ Debug output (shows what will be synced)
     st.write("🔍 Metafields to sync:")
     for m in primary_metafields:
         st.write(f"- {m.namespace}.{m.key} = {m.value} (type: {getattr(m, 'type', 'N/A')})")
-
 
     results = {}
 
@@ -100,12 +97,14 @@ def sync_product_fields(primary_product):
             )
 
             field_results = {}
+
             for m in primary_metafields:
                 try:
                     existing = [
                         mf for mf in target_metafields
                         if mf.key == m.key and mf.namespace == m.namespace
                     ]
+
                     if existing:
                         existing[0].value = m.value
                         existing[0].save()
@@ -113,20 +112,59 @@ def sync_product_fields(primary_product):
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
-                        new_m.value = m.value
-                        new_m.type = getattr(m, "type", "single_line_text_field")
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
-                        new_m.save()
+
+                        # Infer type
+                        value = m.value
+                        if hasattr(m, "type") and m.type:
+                            metafield_type = m.type
+                        else:
+                            # Auto-detect type based on value
+                            try:
+                                float_val = float(value)
+                                metafield_type = "number_decimal"
+                            except:
+                                try:
+                                    int_val = int(value)
+                                    metafield_type = "number_integer"
+                                except:
+                                    if isinstance(value, dict):
+                                        value = json.dumps(value)
+                                        metafield_type = "json"
+                                    elif isinstance(value, list):
+                                        value = json.dumps(value)
+                                        metafield_type = "json"
+                                    else:
+                                        metafield_type = "single_line_text_field"
+
+                        new_m.type = metafield_type
+                        new_m.value = str(value)
+
+                        # Debug info
+                        st.write(f"📝 Creating metafield: {new_m.namespace}.{new_m.key} = {new_m.value} (type: {new_m.type})")
+
+                        # Save and report
+                        success = new_m.save()
+                        if not success:
+                            error_messages = new_m.errors.full_messages()
+                            st.error(f"❌ Failed to save {new_m.key}: {error_messages}")
+                            field_results[m.key] = f"{FAILURE_ICON} ({error_messages})"
+                            continue
+
                     field_results[m.key] = SUCCESS_ICON
+
                 except Exception as e:
                     field_results[m.key] = f"{FAILURE_ICON} ({str(e)})"
 
             results[label] = field_results
+
         except Exception as e:
             results[label] = {"error": str(e)}
 
     return results
+
+
 
 
 # ✅ Wrap Streamlit UI inside a callable function
