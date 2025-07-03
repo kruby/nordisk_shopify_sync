@@ -67,9 +67,11 @@ def sync_product_fields(primary_product):
         return
 
     sync_keys = get_sync_keys(primary_product)
-    primary_metafields = [
-        m for m in primary_product.metafields() if m.key in sync_keys
-    ]
+    all_metafields = shopify.Metafield.find(resource_id=primary_product.id, resource_type="product")
+primary_metafields = [m for m in all_metafields if m.key in sync_keys]
+
+for m in all_metafields:
+    print(f"{m.namespace}.{m.key}: {m.value} (type={getattr(m, 'type', 'N/A')})")
 
     results = {}
 
@@ -100,7 +102,7 @@ def sync_product_fields(primary_product):
                         new_m.namespace = m.namespace
                         new_m.key = m.key
                         new_m.value = m.value
-                        new_m.type = m.type
+                        new_m.type = getattr(m, "type", "single_line_text_field")
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
                         new_m.save()
