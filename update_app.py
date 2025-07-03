@@ -66,12 +66,20 @@ def sync_product_fields(primary_product):
         st.warning("Primary product has no variant barcode set.")
         return
 
+    # Retrieve sync keys from the sync_fields metafield
     sync_keys = get_sync_keys(primary_product)
-    all_metafields = shopify.Metafield.find(resource_id=primary_product.id, resource_type="product")
-primary_metafields = [m for m in all_metafields if m.key in sync_keys]
 
-for m in all_metafields:
-    print(f"{m.namespace}.{m.key}: {m.value} (type={getattr(m, 'type', 'N/A')})")
+    # Get all metafields (including unstructured)
+    all_metafields = shopify.Metafield.find(
+    resource_id=primary_product.id, resource_type="product"
+    )
+    primary_metafields = [m for m in all_metafields if m.key in sync_keys]
+
+    # ✅ Debug output (shows what will be synced)
+    st.write("🔍 Metafields to sync:")
+    for m in primary_metafields:
+        st.write(f"- {m.namespace}.{m.key} = {m.value} (type: {getattr(m, 'type', 'N/A')})")
+
 
     results = {}
 
@@ -87,11 +95,15 @@ for m in all_metafields:
                 results[label] = {"error": "Inactive or product not found via variant barcode"}
                 continue
 
+            target_metafields = shopify.Metafield.find(
+                resource_id=target_product.id, resource_type="product"
+            )
+
             field_results = {}
             for m in primary_metafields:
                 try:
                     existing = [
-                        mf for mf in target_product.metafields()
+                        mf for mf in target_metafields
                         if mf.key == m.key and mf.namespace == m.namespace
                     ]
                     if existing:
@@ -107,14 +119,15 @@ for m in all_metafields:
                         new_m.owner_resource = "product"
                         new_m.save()
                     field_results[m.key] = SUCCESS_ICON
-                except:
-                    field_results[m.key] = FAILURE_ICON
+                except Exception as e:
+                    field_results[m.key] = f"{FAILURE_ICON} ({str(e)})"
 
             results[label] = field_results
         except Exception as e:
             results[label] = {"error": str(e)}
 
     return results
+
 
 # ✅ Wrap Streamlit UI inside a callable function
 def run_update_app():
