@@ -103,12 +103,13 @@ for key, m in existing_fields.items():
     if show_only_sync and key not in sync_keys:
         continue
     product_fields.append({
-        "key": key,
-        "value": m.value,
-        "product_id": selected_product.id,
-        "sync": key in sync_keys,
-        "metafield_obj": m
-    })
+    "key": key,
+    "value": str(m.value) if m.value is not None else "",
+    "type": getattr(m, "type", "string"),  # ✅ Add this line
+    "product_id": selected_product.id,
+    "sync": key in sync_keys,
+    "metafield_obj": m
+})
 
 edited_df = None
 if product_fields:
