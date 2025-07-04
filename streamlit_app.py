@@ -161,6 +161,7 @@ if variant_rows:
 # --- Variant Metafield Save Logic ---
 if edited_df_v is not None:
     success_count = 0
+    updated_variant_sync_keys_combined = set()
     row_lookup = {
         (row["variant_id"], row["key"]): row["metafield_obj"]
         for row in variant_rows
@@ -334,7 +335,7 @@ if st.button("📦 Apply Sync Settings to All in Category"):
     st.success("✅ Sync settings applied to all products and variants in this category.")
 
 st.markdown("---")
-st.markdown("## 🌍 Cross-Store Sync 1356")
+st.markdown("## 🌍 Cross-Store Sync 1424")
 
 if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
     results = sync_product_fields(selected_product)
