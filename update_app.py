@@ -12,7 +12,7 @@ STORE_C_URL = st.secrets["STORE_C_URL"]
 TOKEN = st.secrets["TOKEN_A"]
 TOKEN_B = st.secrets["TOKEN_B"]
 TOKEN_C = st.secrets["TOKEN_C"]
-API_VERSION = "2024-07"
+API_VERSION = "2024-04"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
