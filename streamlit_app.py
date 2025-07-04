@@ -4,7 +4,9 @@ import pandas as pd
 import json
 import time
 from pyactiveresource.connection import ClientError
+from update_app import run_update_app
 from update_app import sync_product_fields
+
 
 # --- Set wide layout ---
 st.set_page_config(layout="wide")
@@ -264,6 +266,7 @@ if cross_sync_clicked:
             else:
                 for key, status in result.items():
                     sync_logs.append(f"{key}: {status}")
+
 
 # --- Log Display ---
 with st.expander("💬 Save/Sync Output Logs", expanded=False):
