@@ -238,7 +238,19 @@ if save_clicked:
             if save_sync_keys(variant, keys_to_sync):
                 variant_save_logs.append(f"✅ Saved variant {variant_id} sync fields: {', '.join(keys_to_sync)}")
 # --- Apply Sync ---
-# (Unchanged)
+if apply_sync_clicked:
+    current_product_keys = get_sync_keys(selected_product)
+    current_variant_keys = set()
+    for v in selected_product.variants:
+        current_variant_keys.update(get_sync_keys(v))
+
+    apply_sync_keys_to_category(
+        products,
+        selected_product.product_type,
+        current_product_keys,
+        list(current_variant_keys)
+    )
+    product_save_logs.append("✅ Sync settings applied to all products and variants in this category.")
 # --- Cross-store Sync ---
 # (Unchanged)
 
