@@ -111,13 +111,16 @@ def sync_product_fields(primary_product):
                     if existing:
                         existing[0].value = value
                         existing[0].type = m.type
+                        existing[0].value_type = m.type  # explicitly set value_type for integer, json, etc.
                         existing[0].save()
+
                     else:
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
                         new_m.value = value
                         new_m.type = m.type
+                        new_m.value_type = m.type  # explicitly set this line
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
                         new_m.save()
