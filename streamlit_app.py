@@ -6,6 +6,9 @@ import time
 from pyactiveresource.connection import ClientError
 from update_app import sync_product_fields
 
+# --- Set wide layout ---
+st.set_page_config(layout="wide")
+
 # --- Shopify Setup ---
 SHOP_URL = st.secrets["STORE_A_URL"]
 TOKEN = st.secrets["TOKEN_A"]
