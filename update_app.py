@@ -63,13 +63,13 @@ def find_product_by_variant_barcode(barcode):
 def coerce_value_by_type(value, metafield_type):
     try:
         if metafield_type == "integer":
-            return str(int(value))
+            return int(value)
         elif metafield_type == "boolean":
-            return "true" if str(value).lower() in ["true", "1", "yes"] else "false"
+            return str(value).lower() in ["true", "1", "yes"]
         elif metafield_type == "json":
-            return json.dumps(json.loads(value)) if isinstance(value, str) else json.dumps(value)
+            return json.loads(value) if isinstance(value, str) else value
         elif metafield_type in ["float", "decimal"]:
-            return str(float(value))
+            return float(value)
         else:
             return str(value)
     except:
@@ -111,16 +111,15 @@ def sync_product_fields(primary_product):
                     if existing:
                         existing[0].value = value
                         existing[0].type = m.type
-                        existing[0].value_type = m.type  # explicitly set value_type for integer, json, etc.
+                        existing[0].value_type = m.type
                         existing[0].save()
-
                     else:
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
                         new_m.value = value
                         new_m.type = m.type
-                        new_m.value_type = m.type  # explicitly set this line
+                        new_m.value_type = m.type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
                         new_m.save()
