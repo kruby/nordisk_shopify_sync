@@ -12,7 +12,7 @@ STORE_C_URL = st.secrets["STORE_C_URL"]
 TOKEN = st.secrets["TOKEN_A"]
 TOKEN_B = st.secrets["TOKEN_B"]
 TOKEN_C = st.secrets["TOKEN_C"]
-API_VERSION = "2024-07"
+API_VERSION = "2023-10"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
@@ -67,16 +67,9 @@ def sync_product_fields(primary_product):
         return
 
     sync_keys = get_sync_keys(primary_product)
-
-    all_metafields = shopify.Metafield.find(
-        resource_id=primary_product.id,
-        resource_type="product"
-    )
-    primary_metafields = [m for m in all_metafields if m.key in sync_keys]
-
-    st.write("🔍 Metafields to sync:")
-    for m in primary_metafields:
-        st.write(f"- {m.namespace}.{m.key} = {m.value} (type: {getattr(m, 'type', 'N/A')})")
+    primary_metafields = [
+        m for m in primary_product.metafields() if m.key in sync_keys
+    ]
 
     results = {}
 
@@ -92,19 +85,13 @@ def sync_product_fields(primary_product):
                 results[label] = {"error": "Inactive or product not found via variant barcode"}
                 continue
 
-            target_metafields = shopify.Metafield.find(
-                resource_id=target_product.id, resource_type="product"
-            )
-
             field_results = {}
-
             for m in primary_metafields:
                 try:
                     existing = [
-                        mf for mf in target_metafields
+                        mf for mf in target_product.metafields()
                         if mf.key == m.key and mf.namespace == m.namespace
                     ]
-
                     if existing:
                         existing[0].value = m.value
                         existing[0].save()
@@ -112,60 +99,20 @@ def sync_product_fields(primary_product):
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
+                        new_m.value = m.value
+                        new_m.type = m.type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
-
-                        # Infer type
-                        value = m.value
-                        if hasattr(m, "type") and m.type:
-                            metafield_type = m.type
-                        else:
-                            # Auto-detect type based on value
-                            try:
-                                float_val = float(value)
-                                metafield_type = "number_decimal"
-                            except:
-                                try:
-                                    int_val = int(value)
-                                    metafield_type = "number_integer"
-                                except:
-                                    if isinstance(value, dict):
-                                        value = json.dumps(value)
-                                        metafield_type = "json"
-                                    elif isinstance(value, list):
-                                        value = json.dumps(value)
-                                        metafield_type = "json"
-                                    else:
-                                        metafield_type = "single_line_text_field"
-
-                        new_m.type = metafield_type
-                        new_m.value = str(value)
-
-                        # Debug info
-                        st.write(f"📝 Creating metafield: {new_m.namespace}.{new_m.key} = {new_m.value} (type: {new_m.type})")
-
-                        # Save and report
-                        success = new_m.save()
-                        if not success:
-                            error_messages = new_m.errors.full_messages()
-                            st.error(f"❌ Failed to save {new_m.key}: {error_messages}")
-                            field_results[m.key] = f"{FAILURE_ICON} ({error_messages})"
-                            continue
-
+                        new_m.save()
                     field_results[m.key] = SUCCESS_ICON
-
-                except Exception as e:
-                    field_results[m.key] = f"{FAILURE_ICON} ({str(e)})"
+                except:
+                    field_results[m.key] = FAILURE_ICON
 
             results[label] = field_results
-
         except Exception as e:
             results[label] = {"error": str(e)}
 
     return results
-
-
-
 
 # ✅ Wrap Streamlit UI inside a callable function
 def run_update_app():

@@ -227,7 +227,7 @@ if st.button("📦 Apply Sync Settings to All in Category"):
     st.success("✅ Sync settings applied to all products and variants in this category.")
 
 st.markdown("---")
-st.markdown("## 🌍 Cross-Store Sync")
+st.markdown("## 🌍 Cross-Store Sync 1340")
 
 if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
     results = sync_product_fields(selected_product)
@@ -240,5 +240,3 @@ if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
             else:
                 for key, status in result.items():
                     st.write(f"{key}: {status}")
-
-
