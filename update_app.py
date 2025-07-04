@@ -66,16 +66,23 @@ def find_variant_by_barcode(product, barcode):
             return variant
     return None
 
+def normalize_type(metafield_type):
+    if metafield_type == "integer":
+        return "number_integer"
+    elif metafield_type == "float":
+        return "number_decimal"
+    return metafield_type
+
 def coerce_value_by_type(value, metafield_type):
     try:
         if metafield_type == "integer":
             return str(int(value))
+        elif metafield_type == "float":
+            return str(float(value))
         elif metafield_type == "boolean":
             return "true" if str(value).lower() in ["true", "1", "yes"] else "false"
         elif metafield_type == "json":
             return json.dumps(json.loads(value)) if isinstance(value, str) else json.dumps(value)
-        elif metafield_type in ["float", "decimal"]:
-            return str(float(value))
         else:
             return str(value)
     except:
@@ -110,6 +117,7 @@ def sync_product_fields(primary_product):
             for m in primary_metafields:
                 try:
                     value = coerce_value_by_type(m.value, m.type)
+                    m_type = normalize_type(m.type)
                     existing = [
                         mf for mf in target_product.metafields()
                         if mf.key == m.key and mf.namespace == m.namespace
@@ -117,14 +125,14 @@ def sync_product_fields(primary_product):
                     if existing:
                         mf = existing[0]
                         mf.value = value
-                        mf.type = m.type
+                        mf.type = m_type
                         mf.save()
                     else:
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
                         new_m.value = value
-                        new_m.type = m.type
+                        new_m.type = m_type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
                         new_m.save()
@@ -132,7 +140,6 @@ def sync_product_fields(primary_product):
                 except Exception as e:
                     field_results[m.key] = f"❌ {str(e)}"
 
-            # Sync variant metafields
             for primary_variant in primary_product.variants:
                 if not primary_variant.barcode:
                     continue
@@ -145,6 +152,7 @@ def sync_product_fields(primary_product):
                         continue
                     try:
                         value = coerce_value_by_type(m.value, m.type)
+                        m_type = normalize_type(m.type)
                         existing = [
                             mf for mf in target_variant.metafields()
                             if mf.key == m.key and mf.namespace == m.namespace
@@ -152,14 +160,14 @@ def sync_product_fields(primary_product):
                         if existing:
                             mf = existing[0]
                             mf.value = value
-                            mf.type = m.type
+                            mf.type = m_type
                             mf.save()
                         else:
                             new_m = shopify.Metafield()
                             new_m.namespace = m.namespace
                             new_m.key = m.key
                             new_m.value = value
-                            new_m.type = m.type
+                            new_m.type = m_type
                             new_m.owner_id = target_variant.id
                             new_m.owner_resource = "variant"
                             new_m.save()
