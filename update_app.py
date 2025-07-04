@@ -138,8 +138,20 @@ def sync_product_fields(primary_product):
                     log_lines.append(f"❌ Error syncing product metafield '{m.key}': {e}")
                     field_results[m.key] = f"❌ {str(e)}"
 
+            # Match variants by barcode
+            barcode_to_target_variant = {
+                v.barcode.strip(): v for v in target_product.variants if v.barcode
+            }
+
             for primary_variant in primary_product.variants:
                 sync_keys_variant = get_sync_keys(primary_variant)
+                if not primary_variant.barcode:
+                    continue
+                target_variant = barcode_to_target_variant.get(primary_variant.barcode.strip())
+                if not target_variant:
+                    log_lines.append(f"⚠️ No matching variant in {label} for barcode {primary_variant.barcode}")
+                    continue
+
                 for m in primary_variant.metafields():
                     if m.key not in sync_keys_variant:
                         continue
@@ -147,28 +159,28 @@ def sync_product_fields(primary_product):
                         value = convert_value_for_type(m.value, m.type)
                         m_type = normalize_type(m.type)
 
-                        for target_variant in target_product.variants:
-                            existing = [
-                                mf for mf in target_variant.metafields()
-                                if mf.key == m.key and mf.namespace == m.namespace
-                            ]
-                            if existing:
-                                mf = existing[0]
-                                log_lines.append(f"🔄 Updating variant metafield '{m.key}' for variant ID {target_variant.id}")
-                                mf.value = value
-                                mf.type = m_type
-                                mf.save()
-                            else:
-                                log_lines.append(f"➕ Creating variant metafield '{m.key}' for variant ID {target_variant.id}")
-                                new_m = shopify.Metafield()
-                                new_m.namespace = m.namespace
-                                new_m.key = m.key
-                                new_m.value = value
-                                new_m.type = m_type
-                                new_m.owner_id = target_variant.id
-                                new_m.owner_resource = "variant"
-                                new_m.save()
-                            field_results[f"variant:{target_variant.id}:{m.key}"] = SUCCESS_ICON
+                        existing = [
+                            mf for mf in target_variant.metafields()
+                            if mf.key == m.key and mf.namespace == m.namespace
+                        ]
+
+                        if existing:
+                            mf = existing[0]
+                            log_lines.append(f"🔄 Updating variant metafield '{m.key}' for barcode {primary_variant.barcode}")
+                            mf.value = value
+                            mf.type = m_type
+                            mf.save()
+                        else:
+                            log_lines.append(f"➕ Creating variant metafield '{m.key}' for barcode {primary_variant.barcode}")
+                            new_m = shopify.Metafield()
+                            new_m.namespace = m.namespace
+                            new_m.key = m.key
+                            new_m.value = value
+                            new_m.type = m_type
+                            new_m.owner_id = target_variant.id
+                            new_m.owner_resource = "variant"
+                            new_m.save()
+                        field_results[f"variant:{target_variant.id}:{m.key}"] = SUCCESS_ICON
                     except Exception as e:
                         log_lines.append(f"❌ Error syncing variant metafield '{m.key}': {e}")
                         field_results[f"variant:{m.key}"] = f"❌ {str(e)}"
