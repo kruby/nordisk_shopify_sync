@@ -73,20 +73,16 @@ def normalize_type(metafield_type):
         return "number_decimal"
     return metafield_type
 
-def coerce_value_by_type(value, metafield_type):
-    try:
-        if metafield_type == "integer":
-            return str(int(value))
-        elif metafield_type == "float":
-            return str(float(value))
-        elif metafield_type == "boolean":
-            return "true" if str(value).lower() in ["true", "1", "yes"] else "false"
-        elif metafield_type == "json":
-            return json.dumps(json.loads(value)) if isinstance(value, str) else json.dumps(value)
-        else:
-            return str(value)
-    except:
-        return str(value)
+def convert_value_for_type(value, metafield_type):
+    if metafield_type == "integer":
+        return int(value)
+    elif metafield_type == "float":
+        return float(value)
+    elif metafield_type == "boolean":
+        return True if str(value).lower() in ["true", "1", "yes"] else False
+    elif metafield_type == "json":
+        return json.loads(value) if isinstance(value, str) else value
+    return str(value)
 
 def sync_product_fields(primary_product):
     product_barcode = get_variant_barcode(primary_product)
@@ -116,12 +112,14 @@ def sync_product_fields(primary_product):
             field_results = {}
             for m in primary_metafields:
                 try:
-                    value = coerce_value_by_type(m.value, m.type)
+                    value = convert_value_for_type(m.value, m.type)
                     m_type = normalize_type(m.type)
+
                     existing = [
                         mf for mf in target_product.metafields()
                         if mf.key == m.key and mf.namespace == m.namespace
                     ]
+
                     if existing:
                         mf = existing[0]
                         mf.value = value
@@ -155,7 +153,7 @@ def sync_product_fields(primary_product):
                     if m.key not in sync_keys_variant:
                         continue
                     try:
-                        value = coerce_value_by_type(m.value, m.type)
+                        value = convert_value_for_type(m.value, m.type)
                         m_type = normalize_type(m.type)
                         existing = [
                             mf for mf in target_variant.metafields()
