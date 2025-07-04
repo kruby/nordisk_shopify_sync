@@ -118,9 +118,10 @@ for key, m in existing_fields.items():
     product_fields.append({
         "key": key,
         "value": str(m.value) if m.value is not None else "",
-        "type": getattr(m, "type", "string"),
-        "product_id": selected_product.id,
         "sync": key in sync_keys,
+        "product_id": selected_product.id,
+        "product_title": selected_product.title,
+        "type": getattr(m, "type", "string"),
         "metafield_obj": m
     })
 
@@ -145,12 +146,13 @@ for variant in selected_product.variants:
             if show_only_sync and key not in variant_sync_keys:
                 continue
             variant_rows.append({
-                "variant_id": variant.id,
-                "variant_title": variant.title,
                 "key": key,
                 "value": str(m.value) if m.value is not None else "",
-                "type": getattr(m, "type", "string"),
                 "sync": key in variant_sync_keys,
+                "variant_id": variant.id,
+                "variant_title": variant.title,
+                "product_id": selected_product.id,
+                "type": getattr(m, "type", "string"),
                 "metafield_obj": m
             })
     except ClientError as e:
