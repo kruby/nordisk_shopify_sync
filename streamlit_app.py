@@ -14,7 +14,7 @@ st.set_page_config(layout="wide")
 # --- Shopify Setup ---
 SHOP_URL = st.secrets["STORE_A_URL"]
 TOKEN = st.secrets["TOKEN_A"]
-API_VERSION = "2024-04"
+API_VERSION = "2024-07"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
