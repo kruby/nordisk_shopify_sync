@@ -94,6 +94,7 @@ def sync_product_fields(primary_product):
                     ]
                     if existing:
                         existing[0].value = m.value
+                        existing[0].type = m.type  # Ensure correct type is preserved
                         existing[0].save()
                     else:
                         new_m = shopify.Metafield()
@@ -105,8 +106,8 @@ def sync_product_fields(primary_product):
                         new_m.owner_resource = "product"
                         new_m.save()
                     field_results[m.key] = SUCCESS_ICON
-                except:
-                    field_results[m.key] = FAILURE_ICON
+                except Exception as e:
+                    field_results[m.key] = f"❌ {str(e)}"
 
             results[label] = field_results
         except Exception as e:
