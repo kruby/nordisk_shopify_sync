@@ -60,6 +60,12 @@ def find_product_by_variant_barcode(barcode):
             break
     return None
 
+def find_variant_by_barcode(product, barcode):
+    for variant in product.variants:
+        if variant.barcode and variant.barcode.strip() == barcode:
+            return variant
+    return None
+
 def coerce_value_by_type(value, metafield_type):
     try:
         if metafield_type == "integer":
@@ -125,6 +131,41 @@ def sync_product_fields(primary_product):
                     field_results[m.key] = SUCCESS_ICON
                 except Exception as e:
                     field_results[m.key] = f"❌ {str(e)}"
+
+            # Sync variant metafields
+            for primary_variant in primary_product.variants:
+                if not primary_variant.barcode:
+                    continue
+                sync_keys_variant = get_sync_keys(primary_variant)
+                target_variant = find_variant_by_barcode(target_product, primary_variant.barcode.strip())
+                if not target_variant:
+                    continue
+                for m in primary_variant.metafields():
+                    if m.key not in sync_keys_variant:
+                        continue
+                    try:
+                        value = coerce_value_by_type(m.value, m.type)
+                        existing = [
+                            mf for mf in target_variant.metafields()
+                            if mf.key == m.key and mf.namespace == m.namespace
+                        ]
+                        if existing:
+                            mf = existing[0]
+                            mf.value = value
+                            mf.type = m.type
+                            mf.save()
+                        else:
+                            new_m = shopify.Metafield()
+                            new_m.namespace = m.namespace
+                            new_m.key = m.key
+                            new_m.value = value
+                            new_m.type = m.type
+                            new_m.owner_id = target_variant.id
+                            new_m.owner_resource = "variant"
+                            new_m.save()
+                        field_results[f"{target_variant.id}:{m.key}"] = SUCCESS_ICON
+                    except Exception as e:
+                        field_results[f"{target_variant.id}:{m.key}"] = f"❌ {str(e)}"
 
             results[label] = field_results
         except Exception as e:
