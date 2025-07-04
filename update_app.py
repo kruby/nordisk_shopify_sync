@@ -66,9 +66,8 @@ def find_product_by_variant_barcode(barcode):
     return None
 
 
-def find_variant_by_barcode(product_id, barcode):
-    variants = shopify.Variant.find(product_id=product_id)
-    for variant in variants:
+def find_variant_by_barcode_in_product(product, barcode):
+    for variant in product.variants:
         if variant.barcode and variant.barcode.strip() == barcode:
             return variant
     return None
@@ -162,7 +161,7 @@ def sync_product_fields(primary_product):
                 if not primary_variant.barcode:
                     continue
                 sync_keys_variant = get_sync_keys(primary_variant)
-                target_variant = find_variant_by_barcode(target_product.id, primary_variant.barcode.strip())
+                target_variant = find_variant_by_barcode_in_product(target_product, primary_variant.barcode.strip())
                 if not target_variant:
                     log_lines.append(f"❌ No matching variant for barcode {primary_variant.barcode.strip()} in {label}")
                     field_results[f"{primary_variant.id}"] = "❌ No matching variant in target store"
