@@ -12,7 +12,7 @@ from update_app import sync_product_fields
 # --- Shopify Setup ---
 SHOP_URL = st.secrets["STORE_A_URL"]
 TOKEN = st.secrets["TOKEN_A"]
-API_VERSION = "2023-10"
+API_VERSION = "2024-07"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
@@ -227,7 +227,7 @@ if st.button("📦 Apply Sync Settings to All in Category"):
     st.success("✅ Sync settings applied to all products and variants in this category.")
 
 st.markdown("---")
-st.markdown("## 🌍 Cross-Store Sync 1340")
+st.markdown("## 🌍 Cross-Store Sync 1345")
 
 if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
     results = sync_product_fields(selected_product)
