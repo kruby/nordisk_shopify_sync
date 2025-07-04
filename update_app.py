@@ -12,7 +12,7 @@ STORE_C_URL = st.secrets["STORE_C_URL"]
 TOKEN = st.secrets["TOKEN_A"]
 TOKEN_B = st.secrets["TOKEN_B"]
 TOKEN_C = st.secrets["TOKEN_C"]
-API_VERSION = "2024-07"
+API_VERSION = "2023-10"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
@@ -53,30 +53,12 @@ def find_product_by_variant_barcode(barcode):
         for product in page:
             for variant in product.variants:
                 if variant.barcode and variant.barcode.strip() == barcode:
-                    return shopify.Product.find(product.id)
+                    return product
         try:
             page = page.next_page()
         except Exception:
             break
     return None
-
-def normalize_type(metafield_type):
-    if metafield_type == "integer":
-        return "number_integer"
-    elif metafield_type == "float":
-        return "number_decimal"
-    return metafield_type
-
-def convert_value_for_type(value, metafield_type):
-    if metafield_type == "integer":
-        return int(value)
-    elif metafield_type == "float":
-        return float(value)
-    elif metafield_type == "boolean":
-        return True if str(value).lower() in ["true", "1", "yes"] else False
-    elif metafield_type == "json":
-        return json.loads(value) if isinstance(value, str) else value
-    return str(value)
 
 def sync_product_fields(primary_product):
     product_barcode = get_variant_barcode(primary_product)
@@ -85,9 +67,16 @@ def sync_product_fields(primary_product):
         return
 
     sync_keys = get_sync_keys(primary_product)
-    primary_metafields = [
-        m for m in primary_product.metafields() if m.key in sync_keys
-    ]
+    primary_metafields = [m for m in primary_product.metafields() if m.key in sync_keys]
+
+    variant_data = []
+    for v in primary_product.variants:
+        variant_sync_keys = get_sync_keys(v)
+        fields = [m for m in v.metafields() if m.key in variant_sync_keys]
+        variant_data.append({
+            "position": v.position,
+            "fields": fields
+        })
 
     results = {}
 
@@ -95,106 +84,70 @@ def sync_product_fields(primary_product):
         (STORE_B_URL, TOKEN_B, "Shop B"),
         (STORE_C_URL, TOKEN_C, "Shop C")
     ]:
-        log_lines = []
         try:
             connect_to_store(store_url, token)
-            log_lines.append(f"🔌 Connected to {label}")
-
             target_product = find_product_by_variant_barcode(product_barcode)
             if not target_product or target_product.status != "active":
-                log_lines.append("❌ Target product not found or inactive")
                 results[label] = {"error": "Inactive or product not found via variant barcode"}
                 continue
 
             field_results = {}
+
             for m in primary_metafields:
                 try:
-                    value = convert_value_for_type(m.value, m.type)
-                    m_type = normalize_type(m.type)
-
                     existing = [
                         mf for mf in target_product.metafields()
                         if mf.key == m.key and mf.namespace == m.namespace
                     ]
-
                     if existing:
-                        mf = existing[0]
-                        log_lines.append(f"🔄 Updating product metafield '{m.key}' with value '{value}' and type '{m_type}'")
-                        mf.value = value
-                        mf.type = m_type
-                        mf.save()
+                        existing[0].value = m.value
+                        existing[0].save()
                     else:
-                        log_lines.append(f"➕ Creating product metafield '{m.key}' with value '{value}' and type '{m_type}'")
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
-                        new_m.value = value
-                        new_m.type = m_type
+                        new_m.value = m.value
+                        new_m.type = m.type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
                         new_m.save()
                     field_results[m.key] = SUCCESS_ICON
-                except Exception as e:
-                    log_lines.append(f"❌ Error syncing product metafield '{m.key}': {e}")
-                    field_results[m.key] = f"❌ {str(e)}"
+                except:
+                    field_results[m.key] = FAILURE_ICON
 
-            # Match variants by barcode (from target product fetched again to ensure complete data)
-            refreshed_product = shopify.Product.find(target_product.id)
-            barcode_to_target_variant = {
-                v.barcode.strip(): v for v in refreshed_product.variants if v.barcode
-            }
-
-            for primary_variant in primary_product.variants:
-                sync_keys_variant = get_sync_keys(primary_variant)
-                if not primary_variant.barcode:
+            for target_variant in target_product.variants:
+                match = next((d for d in variant_data if d["position"] == target_variant.position), None)
+                if not match:
                     continue
-                target_variant = barcode_to_target_variant.get(primary_variant.barcode.strip())
-                if not target_variant:
-                    log_lines.append(f"⚠️ No matching variant in {label} for barcode {primary_variant.barcode}")
-                    continue
-
-                for m in primary_variant.metafields():
-                    if m.key not in sync_keys_variant:
-                        continue
+                for m in match["fields"]:
                     try:
-                        value = convert_value_for_type(m.value, m.type)
-                        m_type = normalize_type(m.type)
-
                         existing = [
                             mf for mf in target_variant.metafields()
                             if mf.key == m.key and mf.namespace == m.namespace
                         ]
-
                         if existing:
-                            mf = existing[0]
-                            log_lines.append(f"🔄 Updating variant metafield '{m.key}' for barcode {primary_variant.barcode}")
-                            mf.value = value
-                            mf.type = m_type
-                            mf.save()
+                            existing[0].value = m.value
+                            existing[0].save()
                         else:
-                            log_lines.append(f"➕ Creating variant metafield '{m.key}' for barcode {primary_variant.barcode}")
                             new_m = shopify.Metafield()
                             new_m.namespace = m.namespace
                             new_m.key = m.key
-                            new_m.value = value
-                            new_m.type = m_type
+                            new_m.value = m.value
+                            new_m.type = m.type
                             new_m.owner_id = target_variant.id
                             new_m.owner_resource = "variant"
                             new_m.save()
-                        field_results[f"variant:{target_variant.id}:{m.key}"] = SUCCESS_ICON
-                    except Exception as e:
-                        log_lines.append(f"❌ Error syncing variant metafield '{m.key}': {e}")
-                        field_results[f"variant:{m.key}"] = f"❌ {str(e)}"
+                        field_results[f"{target_variant.position}:{m.key}"] = SUCCESS_ICON
+                    except:
+                        field_results[f"{target_variant.position}:{m.key}"] = FAILURE_ICON
 
-            log_lines.append("✅ Sync complete")
-            results[label] = {"log": log_lines, **field_results}
-
+            results[label] = field_results
         except Exception as e:
-            log_lines.append(f"❌ {label} sync failed: {e}")
-            results[label] = {"error": str(e), "log": log_lines}
+            results[label] = {"error": str(e)}
 
     return results
 
+# ✅ Wrap Streamlit UI inside a callable function
 def run_update_app():
     st.title("📱 Sync Product Fields to Other Stores")
 
@@ -217,12 +170,8 @@ def run_update_app():
                         st.markdown(f"**{shop}**")
                         if "error" in result:
                             st.error(result["error"])
-                        if "log" in result:
-                            with st.expander("📜 Logs"):
-                                for line in result["log"]:
-                                    st.write(line)
-                        for key, status in result.items():
-                            if key not in ["log", "error"]:
+                        else:
+                            for key, status in result.items():
                                 st.write(f"{key}: {status}")
         else:
             st.error("Product not found with given ID")
