@@ -251,8 +251,19 @@ if apply_sync_clicked:
         list(current_variant_keys)
     )
     product_save_logs.append("✅ Sync settings applied to all products and variants in this category.")
+    
 # --- Cross-store Sync ---
-# (Unchanged)
+if cross_sync_clicked:
+    results = sync_product_fields(selected_product)
+    if results:
+        sync_logs.append("### 🌐 Cross-Store Sync Results")
+        for shop, result in results.items():
+            sync_logs.append(f"**{shop}**")
+            if "error" in result:
+                sync_logs.append(f"❌ {result['error']}")
+            else:
+                for key, status in result.items():
+                    sync_logs.append(f"{key}: {status}")
 
 # --- Log Display ---
 with st.expander("💬 Save/Sync Output Logs", expanded=False):
