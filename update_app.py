@@ -126,6 +126,8 @@ def sync_product_fields(primary_product):
                         mf = existing[0]
                         mf.value = value
                         mf.type = m_type
+                        if m_type == "number_integer":
+                            mf.value_type = "integer"
                         mf.save()
                     else:
                         new_m = shopify.Metafield()
@@ -135,6 +137,8 @@ def sync_product_fields(primary_product):
                         new_m.type = m_type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
+                        if m_type == "number_integer":
+                            new_m.value_type = "integer"
                         new_m.save()
                     field_results[m.key] = SUCCESS_ICON
                 except Exception as e:
@@ -161,6 +165,8 @@ def sync_product_fields(primary_product):
                             mf = existing[0]
                             mf.value = value
                             mf.type = m_type
+                            if m_type == "number_integer":
+                                mf.value_type = "integer"
                             mf.save()
                         else:
                             new_m = shopify.Metafield()
@@ -170,6 +176,8 @@ def sync_product_fields(primary_product):
                             new_m.type = m_type
                             new_m.owner_id = target_variant.id
                             new_m.owner_resource = "variant"
+                            if m_type == "number_integer":
+                                new_m.value_type = "integer"
                             new_m.save()
                         field_results[f"{target_variant.id}:{m.key}"] = SUCCESS_ICON
                     except Exception as e:
