@@ -182,6 +182,7 @@ if st.button("✅ Save All Changes"):
             st.success("✅ Product metafields and sync fields saved.")
 
 if edited_df_v is not None:
+    success_count = 0
     row_lookup = {
         (row["variant_id"], row["key"]): row["metafield_obj"]
         for row in variant_rows
