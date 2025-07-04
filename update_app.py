@@ -122,8 +122,6 @@ def sync_product_fields(primary_product):
                         log_lines.append(f"🔄 Updating product metafield '{m.key}' with value '{value}' and type '{m_type}'")
                         mf.value = value
                         mf.type = m_type
-                        if m_type == "number_integer":
-                            mf.value_type = "integer"
                         mf.save()
                     else:
                         log_lines.append(f"➕ Creating product metafield '{m.key}' with value '{value}' and type '{m_type}'")
@@ -134,8 +132,6 @@ def sync_product_fields(primary_product):
                         new_m.type = m_type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
-                        if m_type == "number_integer":
-                            new_m.value_type = "integer"
                         new_m.save()
                     field_results[m.key] = SUCCESS_ICON
                 except Exception as e:
@@ -151,7 +147,6 @@ def sync_product_fields(primary_product):
                         value = convert_value_for_type(m.value, m.type)
                         m_type = normalize_type(m.type)
 
-                        matched = False
                         for target_variant in target_product.variants:
                             existing = [
                                 mf for mf in target_variant.metafields()
@@ -159,15 +154,11 @@ def sync_product_fields(primary_product):
                             ]
                             if existing:
                                 mf = existing[0]
-                                log_lines.append(f"🔄 Updating variant '{target_variant.title}' (ID: {target_variant.id}) metafield '{m.key}' with value '{value}' and type '{m_type}'")
+                                log_lines.append(f"🔄 Updating variant metafield '{m.key}' for variant ID {target_variant.id}")
                                 mf.value = value
                                 mf.type = m_type
-                                if m_type == "number_integer":
-                                    mf.value_type = "integer"
                                 mf.save()
-                                matched = True
-                        if not matched:
-                            for target_variant in target_product.variants:
+                            else:
                                 log_lines.append(f"➕ Creating variant metafield '{m.key}' for variant ID {target_variant.id}")
                                 new_m = shopify.Metafield()
                                 new_m.namespace = m.namespace
@@ -176,12 +167,10 @@ def sync_product_fields(primary_product):
                                 new_m.type = m_type
                                 new_m.owner_id = target_variant.id
                                 new_m.owner_resource = "variant"
-                                if m_type == "number_integer":
-                                    new_m.value_type = "integer"
                                 new_m.save()
-                                field_results[f"{target_variant.id}:{m.key}"] = SUCCESS_ICON
+                            field_results[f"variant:{target_variant.id}:{m.key}"] = SUCCESS_ICON
                     except Exception as e:
-                        log_lines.append(f"❌ Error syncing variant metafield '{m.key}' for target variants: {e}")
+                        log_lines.append(f"❌ Error syncing variant metafield '{m.key}': {e}")
                         field_results[f"variant:{m.key}"] = f"❌ {str(e)}"
 
             log_lines.append("✅ Sync complete")
