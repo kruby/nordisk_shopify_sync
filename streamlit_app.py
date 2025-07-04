@@ -255,17 +255,17 @@ if apply_sync_clicked:
     product_save_logs.append("✅ Sync settings applied to all products and variants in this category.")
     
 # --- Cross-store Sync ---
-if cross_sync_clicked:
+if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
     results = sync_product_fields(selected_product)
     if results:
-        sync_logs.append("### 🌐 Cross-Store Sync Results")
+        st.subheader("Cross-Store Sync Results")
         for shop, result in results.items():
-            sync_logs.append(f"**{shop}**")
+            st.markdown(f"**{shop}**")
             if "error" in result:
-                sync_logs.append(f"❌ {result['error']}")
+                st.error(result["error"])
             else:
                 for key, status in result.items():
-                    sync_logs.append(f"{key}: {status}")
+                    st.write(f"{key}: {status}")
 
 
 # --- Log Display ---
