@@ -164,7 +164,6 @@ if variant_rows:
 
 # --- Save Logic ---
 if save_clicked:
-    # Save product metafields and sync keys
     if "edited_df" in locals() and edited_df is not None:
         updated_product_sync_keys = []
         row_lookup = {row["key"]: row["metafield_obj"] for row in product_fields}
@@ -200,7 +199,6 @@ if save_clicked:
         if save_sync_keys(selected_product, updated_product_sync_keys):
             product_save_logs.append(f"✅ Saved product sync fields: {', '.join(updated_product_sync_keys)}")
 
-    # Save variant metafields and sync keys
     if "edited_df_v" in locals() and edited_df_v is not None:
         row_lookup = {(row["variant_id"], row["key"]): row["metafield_obj"] for row in variant_rows}
         type_lookup = {(row["variant_id"], row["key"]): row["type"] for row in variant_rows}
@@ -239,6 +237,7 @@ if save_clicked:
 
             if save_sync_keys(variant, keys_to_sync):
                 variant_save_logs.append(f"✅ Saved variant {variant_id} sync fields: {', '.join(keys_to_sync)}")
+
 # --- Apply Sync ---
 if apply_sync_clicked:
     current_product_keys = get_sync_keys(selected_product)
@@ -253,7 +252,7 @@ if apply_sync_clicked:
         list(current_variant_keys)
     )
     product_save_logs.append("✅ Sync settings applied to all products and variants in this category.")
-    
+
 # --- Cross-store Sync ---
 if cross_sync_clicked:
     results = sync_product_fields(selected_product)
@@ -266,7 +265,6 @@ if cross_sync_clicked:
             else:
                 for key, status in result.items():
                     sync_logs.append(f"{key}: {status}")
-
 
 # --- Log Display ---
 with st.expander("💬 Save/Sync Output Logs", expanded=False):
