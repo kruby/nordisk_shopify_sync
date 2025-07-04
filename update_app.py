@@ -12,7 +12,7 @@ STORE_C_URL = st.secrets["STORE_C_URL"]
 TOKEN = st.secrets["TOKEN_A"]
 TOKEN_B = st.secrets["TOKEN_B"]
 TOKEN_C = st.secrets["TOKEN_C"]
-API_VERSION = "2023-10"
+API_VERSION = "2024-07"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
@@ -63,13 +63,13 @@ def find_product_by_variant_barcode(barcode):
 def coerce_value_by_type(value, metafield_type):
     try:
         if metafield_type == "integer":
-            return int(value)
+            return str(int(value))
         elif metafield_type == "boolean":
-            return str(value).lower() in ["true", "1", "yes"]
+            return "true" if str(value).lower() in ["true", "1", "yes"] else "false"
         elif metafield_type == "json":
-            return json.loads(value) if isinstance(value, str) else value
+            return json.dumps(json.loads(value)) if isinstance(value, str) else json.dumps(value)
         elif metafield_type in ["float", "decimal"]:
-            return float(value)
+            return str(float(value))
         else:
             return str(value)
     except:
@@ -109,17 +109,16 @@ def sync_product_fields(primary_product):
                         if mf.key == m.key and mf.namespace == m.namespace
                     ]
                     if existing:
-                        existing[0].value = value
-                        existing[0].type = m.type
-                        existing[0].value_type = m.type
-                        existing[0].save()
+                        mf = existing[0]
+                        mf.value = value
+                        mf.type = m.type
+                        mf.save()
                     else:
                         new_m = shopify.Metafield()
                         new_m.namespace = m.namespace
                         new_m.key = m.key
                         new_m.value = value
                         new_m.type = m.type
-                        new_m.value_type = m.type
                         new_m.owner_id = target_product.id
                         new_m.owner_resource = "product"
                         new_m.save()
@@ -133,7 +132,6 @@ def sync_product_fields(primary_product):
 
     return results
 
-# ✅ Wrap Streamlit UI inside a callable function
 def run_update_app():
     st.title("📱 Sync Product Fields to Other Stores")
 
