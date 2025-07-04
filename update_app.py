@@ -20,11 +20,9 @@ SYNC_KEY = "sync_fields"
 SUCCESS_ICON = "✅"
 FAILURE_ICON = "❌"
 
-
 def connect_to_store(shop_url, token):
     session = shopify.Session(f"https://{shop_url}", API_VERSION, token)
     shopify.ShopifyResource.activate_session(session)
-
 
 def test_shop_access(label, shop_url, token):
     try:
@@ -34,13 +32,11 @@ def test_shop_access(label, shop_url, token):
     except Exception as e:
         return f"❌ {label}: {str(e)}"
 
-
 def get_variant_barcode(resource):
     for variant in resource.variants:
         if variant.barcode:
             return variant.barcode.strip()
     return None
-
 
 def get_sync_keys(resource):
     for m in resource.metafields():
@@ -50,7 +46,6 @@ def get_sync_keys(resource):
             except:
                 return []
     return []
-
 
 def find_product_by_variant_barcode(barcode):
     page = shopify.Product.find(limit=250)
@@ -65,14 +60,12 @@ def find_product_by_variant_barcode(barcode):
             break
     return None
 
-
 def normalize_type(metafield_type):
     if metafield_type == "integer":
         return "number_integer"
     elif metafield_type == "float":
         return "number_decimal"
     return metafield_type
-
 
 def convert_value_for_type(value, metafield_type):
     if metafield_type == "integer":
@@ -84,7 +77,6 @@ def convert_value_for_type(value, metafield_type):
     elif metafield_type == "json":
         return json.loads(value) if isinstance(value, str) else value
     return str(value)
-
 
 def sync_product_fields(primary_product):
     product_barcode = get_variant_barcode(primary_product)
@@ -151,30 +143,34 @@ def sync_product_fields(primary_product):
                     field_results[m.key] = f"❌ {str(e)}"
 
             for primary_variant in primary_product.variants:
-                if not primary_variant.barcode:
-                    continue
                 sync_keys_variant = get_sync_keys(primary_variant)
-                for target_variant in target_product.variants:
-                    for m in primary_variant.metafields():
-                        if m.key not in sync_keys_variant:
-                            continue
-                        try:
-                            value = convert_value_for_type(m.value, m.type)
-                            m_type = normalize_type(m.type)
+                for m in primary_variant.metafields():
+                    if m.key not in sync_keys_variant:
+                        continue
+                    try:
+                        value = convert_value_for_type(m.value, m.type)
+                        m_type = normalize_type(m.type)
+                        matched = False
+
+                        for target_variant in target_product.variants:
                             existing = [
                                 mf for mf in target_variant.metafields()
                                 if mf.key == m.key and mf.namespace == m.namespace
                             ]
                             if existing:
                                 mf = existing[0]
-                                log_lines.append(f"🔄 Updating variant {target_variant.id} metafield '{m.key}' with value '{value}' and type '{m_type}'")
+                                log_lines.append(f"🔄 Updating variant '{target_variant.title}' (ID: {target_variant.id}) metafield '{m.key}' with value '{value}' and type '{m_type}'")
                                 mf.value = value
                                 mf.type = m_type
                                 if m_type == "number_integer":
                                     mf.value_type = "integer"
                                 mf.save()
-                            else:
-                                log_lines.append(f"➕ Creating variant {target_variant.id} metafield '{m.key}' with value '{value}' and type '{m_type}'")
+                                matched = True
+                                break
+
+                        if not matched:
+                            log_lines.append(f"➕ Creating variant metafield '{m.key}' for all variants")
+                            for target_variant in target_product.variants:
                                 new_m = shopify.Metafield()
                                 new_m.namespace = m.namespace
                                 new_m.key = m.key
@@ -185,10 +181,10 @@ def sync_product_fields(primary_product):
                                 if m_type == "number_integer":
                                     new_m.value_type = "integer"
                                 new_m.save()
-                            field_results[f"{target_variant.id}:{m.key}"] = SUCCESS_ICON
-                        except Exception as e:
-                            log_lines.append(f"❌ Error syncing variant metafield '{m.key}' for variant {target_variant.id}: {e}")
-                            field_results[f"{target_variant.id}:{m.key}"] = f"❌ {str(e)}"
+                                field_results[f"{target_variant.id}:{m.key}"] = SUCCESS_ICON
+                    except Exception as e:
+                        log_lines.append(f"❌ Error syncing variant metafield '{m.key}' for target variants: {e}")
+                        field_results[f"variant:{m.key}"] = f"❌ {str(e)}"
 
             log_lines.append("✅ Sync complete")
             results[label] = {"log": log_lines, **field_results}
@@ -198,7 +194,6 @@ def sync_product_fields(primary_product):
             results[label] = {"error": str(e), "log": log_lines}
 
     return results
-
 
 def run_update_app():
     st.title("📱 Sync Product Fields to Other Stores")
