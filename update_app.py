@@ -151,6 +151,7 @@ def sync_product_fields(primary_product):
                         value = convert_value_for_type(m.value, m.type)
                         m_type = normalize_type(m.type)
 
+                        matched = False
                         for target_variant in target_product.variants:
                             existing = [
                                 mf for mf in target_variant.metafields()
@@ -164,7 +165,9 @@ def sync_product_fields(primary_product):
                                 if m_type == "number_integer":
                                     mf.value_type = "integer"
                                 mf.save()
-                            else:
+                                matched = True
+                        if not matched:
+                            for target_variant in target_product.variants:
                                 log_lines.append(f"➕ Creating variant metafield '{m.key}' for variant ID {target_variant.id}")
                                 new_m = shopify.Metafield()
                                 new_m.namespace = m.namespace
