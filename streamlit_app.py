@@ -181,35 +181,65 @@ if st.button("✅ Save All Changes"):
         if save_sync_keys(selected_product, updated_product_sync_keys):
             st.success("✅ Product metafields and sync fields saved.")
 
-    if edited_df_v is not None:
-        row_lookup = {
-            (row["variant_id"], row["key"]): row["metafield_obj"]
-            for row in variant_rows
-        }
-        grouped = edited_df_v.groupby("variant_id")
-        for variant_id, rows in grouped:
-            variant = variant_map[variant_id]
-            keys_to_sync = []
-            for _, row in rows.iterrows():
-                key = row["key"]
-                original = row_lookup.get((variant_id, key))
-                if original and str(original.value) != str(row["value"]):
-                    try:
-                        original.value = row["value"]
-                        if original.save():
-                            success_count += 1
-                            time.sleep(0.6)
-                    except ClientError as e:
-                        if '429' in str(e):
-                            st.warning("Rate limited — retrying after short delay...")
-                            time.sleep(2)
-                            original.save()
-                if row["sync"]:
-                    keys_to_sync.append(key)
-            save_sync_keys(variant, keys_to_sync)
-            updated_variant_sync_keys_combined.update(keys_to_sync)
+if edited_df_v is not None:
+    row_lookup = {
+        (row["variant_id"], row["key"]): row["metafield_obj"]
+        for row in variant_rows
+    }
+    grouped = edited_df_v.groupby("variant_id")
+    for variant_id, rows in grouped:
+        variant = variant_map[variant_id]
+        keys_to_sync = []
 
-        st.success(f"✅ Updated {success_count} variant metafields and sync settings.")
+        for _, row in rows.iterrows():
+            key = row["key"]
+            new_value = row["value"]
+            original = row_lookup.get((variant_id, key))
+
+            if original is None:
+                st.warning(f"⚠️ Skipping unknown metafield '{key}' on variant {variant_id}")
+                continue
+
+            if new_value is None:
+                st.warning(f"⚠️ Metafield '{key}' on variant {variant_id} has no value. Skipping.")
+                continue
+
+            if str(original.value) != str(new_value):
+                try:
+                    original.value = new_value
+                    if hasattr(original, "type") and original.type:
+                        st.info(f"Updating variant {variant_id} metafield '{key}' (type: {original.type}) to '{new_value}'")
+                    else:
+                        st.info(f"Updating variant {variant_id} metafield '{key}' to '{new_value}'")
+
+                    if original.save():
+                        success_count += 1
+                        time.sleep(0.6)
+                    else:
+                        st.error(f"❌ Save failed for variant {variant_id} metafield '{key}'")
+                except ClientError as e:
+                    if '429' in str(e):
+                        st.warning(f"Rate limit hit — retrying save for variant {variant_id} metafield '{key}'...")
+                        time.sleep(2)
+                        try:
+                            original.save()
+                        except Exception as retry_err:
+                            st.error(f"❌ Retry failed for variant {variant_id} metafield '{key}': {retry_err}")
+                    else:
+                        st.error(f"❌ Error saving variant {variant_id} metafield '{key}': {e}")
+                except Exception as e:
+                    st.error(f"❌ Unexpected error saving metafield '{key}' on variant {variant_id}: {e}")
+            else:
+                st.info(f"✅ No change to variant {variant_id} metafield '{key}'")
+
+            if row["sync"]:
+                keys_to_sync.append(key)
+
+        save_sync_keys(variant, keys_to_sync)
+        updated_variant_sync_keys_combined.update(keys_to_sync)
+
+    st.success(f"✅ Updated {success_count} variant metafields and sync settings.")
+
 
 # --- Apply Sync to Category Button ---
 if st.button("📦 Apply Sync Settings to All in Category"):
@@ -227,7 +257,7 @@ if st.button("📦 Apply Sync Settings to All in Category"):
     st.success("✅ Sync settings applied to all products and variants in this category.")
 
 st.markdown("---")
-st.markdown("## 🌍 Cross-Store Sync 1345")
+st.markdown("## 🌍 Cross-Store Sync 1356")
 
 if st.button("📡 Sync This Product to Shop B & C (via EAN)"):
     results = sync_product_fields(selected_product)
