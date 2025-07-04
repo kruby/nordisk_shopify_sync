@@ -138,9 +138,10 @@ def sync_product_fields(primary_product):
                     log_lines.append(f"❌ Error syncing product metafield '{m.key}': {e}")
                     field_results[m.key] = f"❌ {str(e)}"
 
-            # Match variants by barcode
+            # Match variants by barcode (from target product fetched again to ensure complete data)
+            refreshed_product = shopify.Product.find(target_product.id)
             barcode_to_target_variant = {
-                v.barcode.strip(): v for v in target_product.variants if v.barcode
+                v.barcode.strip(): v for v in refreshed_product.variants if v.barcode
             }
 
             for primary_variant in primary_product.variants:
