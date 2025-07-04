@@ -63,17 +63,17 @@ def find_product_by_variant_barcode(barcode):
 def coerce_value_by_type(value, metafield_type):
     try:
         if metafield_type == "integer":
-            return int(value)
+            return str(int(value))
         elif metafield_type == "boolean":
-            return str(value).lower() in ["true", "1", "yes"]
+            return "true" if str(value).lower() in ["true", "1", "yes"] else "false"
         elif metafield_type == "json":
-            return json.loads(value) if isinstance(value, str) else value
+            return json.dumps(json.loads(value)) if isinstance(value, str) else json.dumps(value)
         elif metafield_type in ["float", "decimal"]:
-            return float(value)
+            return str(float(value))
         else:
             return str(value)
     except:
-        return value
+        return str(value)
 
 def sync_product_fields(primary_product):
     product_barcode = get_variant_barcode(primary_product)
