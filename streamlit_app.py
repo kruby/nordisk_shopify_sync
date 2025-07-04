@@ -138,7 +138,8 @@ for variant in selected_product.variants:
                 "variant_id": variant.id,
                 "variant_title": variant.title,
                 "key": key,
-                "value": m.value,
+                "value": str(m.value) if m.value is not None else "",
+                "type": getattr(m, "type", "string"),
                 "sync": key in variant_sync_keys,
                 "metafield_obj": m
             })
@@ -153,8 +154,83 @@ if variant_rows:
     for keys in variant_sync_map.values():
         variant_sync_keys_combined.update(keys)
     st.caption(f"Currently synced variant fields: {', '.join(sorted(variant_sync_keys_combined)) if variant_sync_keys_combined else 'None'}")
+
     df_v = pd.DataFrame(variant_rows).drop(columns=["metafield_obj"])
     edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key="variant_editor")
+
+# --- Variant Metafield Save Logic ---
+if edited_df_v is not None:
+    success_count = 0
+    row_lookup = {
+        (row["variant_id"], row["key"]): row["metafield_obj"]
+        for row in variant_rows
+    }
+    type_lookup = {
+        (row["variant_id"], row["key"]): row["type"]
+        for row in variant_rows
+    }
+    grouped = edited_df_v.groupby("variant_id")
+    for variant_id, rows in grouped:
+        variant = variant_map[variant_id]
+        keys_to_sync = []
+
+        for _, row in rows.iterrows():
+            key = row["key"]
+            new_value = row["value"]
+            original = row_lookup.get((variant_id, key))
+            original_type = type_lookup.get((variant_id, key), "string")
+
+            if original is None:
+                st.warning(f"⚠️ Skipping unknown metafield '{key}' on variant {variant_id}")
+                continue
+
+            if str(original.value) == str(new_value):
+                st.info(f"✅ No change to variant {variant_id} metafield '{key}'")
+                if row["sync"]:
+                    keys_to_sync.append(key)
+                continue
+
+            try:
+                # Convert value back to original type
+                if original_type == "integer":
+                    original.value = int(new_value)
+                elif original_type == "boolean":
+                    original.value = new_value.lower() in ["true", "1", "yes"]
+                elif original_type == "json":
+                    original.value = json.loads(new_value)
+                elif original_type in ["float", "decimal"]:
+                    original.value = float(new_value)
+                else:
+                    original.value = new_value
+
+                if original.save():
+                    success_count += 1
+                    time.sleep(0.6)
+                else:
+                    st.error(f"❌ Save failed for variant {variant_id} metafield '{key}'")
+
+            except ClientError as e:
+                if '429' in str(e):
+                    st.warning(f"Rate limit hit — retrying for variant {variant_id} metafield '{key}'...")
+                    time.sleep(2)
+                    try:
+                        original.save()
+                    except Exception as retry_err:
+                        st.error(f"❌ Retry failed: {retry_err}")
+                else:
+                    st.error(f"❌ Error saving variant {variant_id} metafield '{key}': {e}")
+            except Exception as convert_err:
+                st.error(f"❌ Cannot convert value '{new_value}' to type '{original_type}' for variant {variant_id} metafield '{key}': {convert_err}")
+                continue
+
+            if row["sync"]:
+                keys_to_sync.append(key)
+
+        save_sync_keys(variant, keys_to_sync)
+        updated_variant_sync_keys_combined.update(keys_to_sync)
+
+    st.success(f"✅ Updated {success_count} variant metafields and sync settings.")
+
 
 # --- Unified Save Button ---
 updated_product_sync_keys = []
