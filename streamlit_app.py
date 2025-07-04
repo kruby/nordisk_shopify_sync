@@ -161,7 +161,82 @@ if variant_rows:
     edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key="variant_editor")
 
 # --- Save Logic ---
-# (Unchanged from previous block)
+if save_clicked:
+    # Save product metafields and sync keys
+    if "edited_df" in locals() and edited_df is not None:
+        updated_product_sync_keys = []
+        row_lookup = {row["key"]: row["metafield_obj"] for row in product_fields}
+        type_lookup = {row["key"]: row["type"] for row in product_fields}
+
+        for _, row in edited_df.iterrows():
+            key = row["key"]
+            new_value = row["value"]
+            sync_flag = row["sync"]
+            original = row_lookup.get(key)
+            original_type = type_lookup.get(key, "string")
+
+            if sync_flag:
+                updated_product_sync_keys.append(key)
+
+            if original and str(original.value) != str(new_value):
+                try:
+                    if original_type == "integer":
+                        original.value = int(new_value)
+                    elif original_type == "boolean":
+                        original.value = new_value.lower() in ["true", "1", "yes"]
+                    elif original_type == "json":
+                        original.value = json.loads(new_value)
+                    elif original_type in ["float", "decimal"]:
+                        original.value = float(new_value)
+                    else:
+                        original.value = new_value
+                    original.save()
+                    time.sleep(0.6)
+                except Exception as e:
+                    product_save_logs.append(f"❌ Error saving product metafield '{key}': {e}")
+
+        if save_sync_keys(selected_product, updated_product_sync_keys):
+            product_save_logs.append(f"✅ Saved product sync fields: {', '.join(updated_product_sync_keys)}")
+
+    # Save variant metafields and sync keys
+    if "edited_df_v" in locals() and edited_df_v is not None:
+        row_lookup = {(row["variant_id"], row["key"]): row["metafield_obj"] for row in variant_rows}
+        type_lookup = {(row["variant_id"], row["key"]): row["type"] for row in variant_rows}
+
+        grouped = edited_df_v.groupby("variant_id")
+        for variant_id, rows in grouped:
+            variant = variant_map[variant_id]
+            keys_to_sync = []
+
+            for _, row in rows.iterrows():
+                key = row["key"]
+                new_value = row["value"]
+                sync_flag = row["sync"]
+                original = row_lookup.get((variant_id, key))
+                original_type = type_lookup.get((variant_id, key), "string")
+
+                if sync_flag:
+                    keys_to_sync.append(key)
+
+                if original and str(original.value) != str(new_value):
+                    try:
+                        if original_type == "integer":
+                            original.value = int(new_value)
+                        elif original_type == "boolean":
+                            original.value = new_value.lower() in ["true", "1", "yes"]
+                        elif original_type == "json":
+                            original.value = json.loads(new_value)
+                        elif original_type in ["float", "decimal"]:
+                            original.value = float(new_value)
+                        else:
+                            original.value = new_value
+                        original.save()
+                        time.sleep(0.6)
+                    except Exception as e:
+                        variant_save_logs.append(f"❌ Error saving variant {variant_id} metafield '{key}': {e}")
+
+            if save_sync_keys(variant, keys_to_sync):
+                variant_save_logs.append(f"✅ Saved variant {variant_id} sync fields: {', '.join(keys_to_sync)}")
 # --- Apply Sync ---
 # (Unchanged)
 # --- Cross-store Sync ---
