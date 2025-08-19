@@ -38,6 +38,64 @@ def get_all_products():
             break
     return all_products
 
+
+# --- Cross-store product loaders & matching helpers ---
+def get_products_for_store(store_key, label):
+    # Returns cached products for Store A/B/C, fetching if needed
+    if store_key == "A":
+        url, tok = SHOP_URL, TOKEN
+    elif store_key == "B":
+        url, tok = STORE_B_URL, TOKEN_B
+    else:
+        url, tok = STORE_C_URL, TOKEN_C
+    cache_key = f"products_{store_key}"
+    if cache_key not in st.session_state:
+        connect_to_store(url, tok)
+        with st.spinner(f"Loading products from {label}..."):
+            st.session_state[cache_key] = get_all_products()
+    return st.session_state[cache_key]
+
+def get_product_barcodes(prod):
+    codes = set()
+    try:
+        for v in getattr(prod, "variants", []):
+            bc = getattr(v, "barcode", None)
+            if bc:
+                codes.add(str(bc).strip())
+    except Exception:
+        pass
+    return codes
+
+def find_matching_product_by_ean(all_products, barcode_set):
+    if not barcode_set:
+        return None
+    for prod in all_products:
+        if get_product_barcodes(prod).intersection(barcode_set):
+            return prod
+    return None
+
+def find_matching_product_fallback(all_products, handle=None, title=None):
+    # Try handle first, then exact title match
+    if handle:
+        for prod in all_products:
+            if getattr(prod, "handle", None) == handle:
+                return prod
+    if title:
+        for prod in all_products:
+            if getattr(prod, "title", "").strip().lower() == str(title).strip().lower():
+                return prod
+    return None
+
+def find_match_in_store(store_key, label, a_info):
+    products_list = get_products_for_store(store_key, label)
+    if a_info.get("product_type"):
+        products_list = [p for p in products_list if getattr(p, "product_type", None) == a_info["product_type"]]
+    match = find_matching_product_by_ean(products_list, set(a_info.get("barcodes", [])))
+    if not match:
+        match = find_matching_product_fallback(products_list, a_info.get("handle"), a_info.get("title"))
+    return match
+
+
 def get_sync_keys(resource):
     for m in resource.metafields():
         if m.namespace == SYNC_NAMESPACE and m.key == SYNC_KEY:
