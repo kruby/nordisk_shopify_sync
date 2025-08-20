@@ -158,6 +158,14 @@ product_save_logs = []
 variant_save_logs = []
 sync_logs = []
 
+st.markdown("""
+💡 **How it works:**
+- Edit any metafield values and click **Save All Changes** to update this store (Shop A/B/C).
+- Tick the **sync** box if you want that field included when syncing across stores.
+- The button **Sync This Product to Shop B & C** only pushes fields that are marked for sync,
+  and it uses the **latest saved values** from this shop.
+""")
+
 # --- Save & Sync Buttons ---
 st.markdown("### 💾 Save & Synchronize Metafields")
 col1, col2, col3 = st.columns([1, 1, 2])
