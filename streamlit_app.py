@@ -7,20 +7,74 @@ from pyactiveresource.connection import ClientError
 from update_app import run_update_app
 from update_app import sync_product_fields
 
-
 # --- Set wide layout ---
 st.set_page_config(layout="wide")
 
-# --- Shopify Setup ---
+# --- Shopify Setup (add B & C) ---
 SHOP_URL = st.secrets["STORE_A_URL"]
 TOKEN = st.secrets["TOKEN_A"]
+
+# NEW: add B & C secrets
+STORE_B_URL = st.secrets.get("STORE_B_URL")
+STORE_C_URL = st.secrets.get("STORE_C_URL")
+TOKEN_B = st.secrets.get("TOKEN_B")
+TOKEN_C = st.secrets.get("TOKEN_C")
+
 API_VERSION = "2024-07"
 
 SYNC_NAMESPACE = "sync"
 SYNC_KEY = "sync_fields"
 
-def connect_to_store():
-    session = shopify.Session(f"https://{SHOP_URL}", API_VERSION, TOKEN)
+# NEW: small helper to pick which store we connect to
+def get_store_config():
+    # Support query params so you can open separate windows like ?store=A/B/C
+    # Works with Streamlit's newer st.query_params and older experimental_get_query_params
+    selected = None
+    try:
+        qp = st.query_params  # modern API
+        selected = qp.get("store", None)
+    except Exception:
+        try:
+            qp = st.experimental_get_query_params()  # older API
+            selected = qp.get("store", [None])[0] if "store" in qp else None
+        except Exception:
+            selected = None
+
+    store_options = {
+        "A (source)": {"key": "A", "url": SHOP_URL,     "token": TOKEN,   "label": "Store A"},
+        "B":          {"key": "B", "url": STORE_B_URL,  "token": TOKEN_B, "label": "Store B"},
+        "C":          {"key": "C", "url": STORE_C_URL,  "token": TOKEN_C, "label": "Store C"},
+    }
+
+    # Determine default index from query param
+    default_index = 0
+    if selected and selected.upper() in ("A", "B", "C"):
+        keys = list(store_options.keys())
+        for i, k in enumerate(keys):
+            if store_options[k]["key"] == selected.upper():
+                default_index = i
+                break
+
+    st.markdown("#### Store")
+    store_label = st.selectbox(
+        "Choose which shop to view/edit",
+        list(store_options.keys()),
+        index=default_index,
+        help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
+    )
+    cfg = store_options[store_label]
+    if not cfg["url"] or not cfg["token"]:
+        st.error(f"Missing secrets for {cfg['label']}. Please set {cfg['label']} URL and token in Streamlit secrets.")
+        st.stop()
+    return cfg  # dict with key/url/token/label
+
+def connect_to_store(shop_url=None, token=None):
+    # NEW: dynamic connection based on selected store
+    url = shop_url if shop_url else f"https://{SHOP_URL}"
+    if shop_url and not shop_url.startswith("https://"):
+        url = f"https://{shop_url}"
+    tok = token if token else TOKEN
+    session = shopify.Session(url, API_VERSION, tok)
     shopify.ShopifyResource.activate_session(session)
 
 def get_all_products():
@@ -69,16 +123,22 @@ def apply_sync_keys_to_category(products, product_type, product_sync_keys, varia
 
 # --- Streamlit UI ---
 st.title("🔧 Shopify Product + Variant Metafield Sync Tool")
-connect_to_store()
 
-# Load products
-if "products" not in st.session_state:
-    with st.spinner("Loading products..."):
-        st.session_state.products = get_all_products()
+# NEW: choose store (dropdown + query param support)
+store_cfg = get_store_config()
+connect_to_store(store_cfg["url"], store_cfg["token"])
+store_key = store_cfg["key"]
+store_label = store_cfg["label"]
 
-products = st.session_state.products
+# Load products (cache per store so switching is fast)
+state_key = f"products_{store_key}"
+if state_key not in st.session_state:
+    with st.spinner(f"Loading products from {store_label}..."):
+        st.session_state[state_key] = get_all_products()
+
+products = st.session_state[state_key]
 if not products:
-    st.warning("No products found.")
+    st.warning(f"No products found in {store_label}.")
     st.stop()
 
 product_types = sorted(set(p.product_type for p in products if p.product_type))
@@ -126,9 +186,9 @@ for key, m in existing_fields.items():
     })
 
 if product_fields:
-    st.markdown("### 🔍 Product Metafields")
+    st.markdown(f"### 🔍 Product Metafields — {store_label}")
     df = pd.DataFrame(product_fields).drop(columns=["metafield_obj"])
-    edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key="product_editor")
+    edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key=f"product_editor_{store_key}")
 
 # --- Variant Fields ---
 variant_rows = []
@@ -160,9 +220,9 @@ for variant in selected_product.variants:
             time.sleep(2)
 
 if variant_rows:
-    st.markdown("### 🔍 Variant Metafields")
+    st.markdown(f"### 🔍 Variant Metafields — {store_label}")
     df_v = pd.DataFrame(variant_rows).drop(columns=["metafield_obj"])
-    edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key="variant_editor")
+    edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key=f"variant_editor_{store_key}")
 
 # --- Save Logic ---
 if save_clicked:
@@ -240,7 +300,7 @@ if save_clicked:
             if save_sync_keys(variant, keys_to_sync):
                 variant_save_logs.append(f"✅ Saved variant {variant_id} sync fields: {', '.join(keys_to_sync)}")
 
-# --- Apply Sync ---
+# --- Apply Sync (within selected store) ---
 if apply_sync_clicked:
     current_product_keys = get_sync_keys(selected_product)
     current_variant_keys = set()
@@ -255,7 +315,7 @@ if apply_sync_clicked:
     )
     product_save_logs.append("✅ Sync settings applied to all products and variants in this category.")
 
-# --- Cross-store Sync ---
+# --- Cross-store Sync (kept as-is) ---
 if cross_sync_clicked:
     results = sync_product_fields(selected_product)
     if results:
