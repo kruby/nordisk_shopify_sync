@@ -41,9 +41,9 @@ def get_store_config():
             selected = None
 
     store_options = {
-        "A (source)": {"key": "A", "url": SHOP_URL,     "token": TOKEN,   "label": "Store A"},
-        "B":          {"key": "B", "url": STORE_B_URL,  "token": TOKEN_B, "label": "Store B"},
-        "C":          {"key": "C", "url": STORE_C_URL,  "token": TOKEN_C, "label": "Store C"},
+        "A-(INT)": {"key": "A", "url": SHOP_URL,     "token": TOKEN,   "label": "Store A"},
+        "B-(DA)":          {"key": "B", "url": STORE_B_URL,  "token": TOKEN_B, "label": "Store B"},
+        "C-(DE)":          {"key": "C", "url": STORE_C_URL,  "token": TOKEN_C, "label": "Store C"},
     }
 
     # Determine default index from query param
@@ -130,6 +130,8 @@ connect_to_store(store_cfg["url"], store_cfg["token"])
 store_key = store_cfg["key"]
 store_label = store_cfg["label"]
 
+st.info(f"Viewing & editing: **{store_label}**", icon="🏬")
+
 # Load products (cache per store so switching is fast)
 state_key = f"products_{store_key}"
 if state_key not in st.session_state:
@@ -174,7 +176,48 @@ with col1:
 with col2:
     apply_sync_clicked = st.button("📦 Apply Sync Settings to All in Category")
 with col3:
-    cross_sync_clicked = st.button("📡 Sync This Product to Shop B & C (via EAN)")
+    if store_key == "A":
+        cross_sync_clicked = st.button("📡 Sync This Product to Shop B & C (via EAN)")
+    else:
+        st.caption("Cross-store sync is available when viewing Store A.")
+        cross_sync_clicked = False
+
+
+# --- Standard Product Fields (editable) ---
+standard_fields_schema = [
+    ("title", "Title"),
+    ("handle", "Handle"),
+    ("vendor", "Vendor"),
+    ("product_type", "Product Type"),
+    ("tags", "Tags (comma-separated)"),
+    ("status", "Status (active/draft/archived)"),
+]
+
+def _std_get_val(attr):
+    v = getattr(selected_product, attr, "")
+    if attr == "tags":
+        # Shopify often stores tags as a comma-separated string
+        if isinstance(v, list):
+            return ", ".join(v)
+        return str(v or "")
+    return "" if v is None else str(v)
+
+_std_rows = [{"field": label, "attr": attr, "value": _std_get_val(attr)}
+             for attr, label in standard_fields_schema]
+_std_df = pd.DataFrame(_std_rows, columns=["field", "attr", "value"])
+
+st.markdown("### 📦 Standard Product Fields")
+# Show a 2-column editable table (Field | Value). Keep "attr" in session so we know what to save.
+edited_std_df = st.data_editor(
+    _std_df.drop(columns=["attr"]),
+    num_rows="fixed",
+    use_container_width=True,
+    key="standard_editor"
+)
+st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_rows}
+
+
+
 
 # --- Product Fields ---
 product_fields = []
@@ -234,6 +277,76 @@ if variant_rows:
 
 # --- Save Logic ---
 if save_clicked:
+    # --- Save standard fields (Title, Handle, Vendor, Product Type, Tags, Status) ---
+    try:
+        std_map = st.session_state.get("_std_attr_map", {})
+        std_updates = {}
+
+        if "edited_std_df" in locals() or "edited_std_df" in globals():
+            df_std_current = edited_std_df  # from the table we created above
+            for _, row in df_std_current.iterrows():
+                field_label = row["field"]
+                new_val = str(row["value"]) if row["value"] is not None else ""
+                attr = std_map.get(field_label)
+                if not attr:
+                    continue
+
+                current = getattr(selected_product, attr, "")
+                if attr == "tags":
+                    current_str = ", ".join(current) if isinstance(current, list) else (current or "")
+                    if new_val.strip() != str(current_str).strip():
+                        std_updates[attr] = new_val
+                else:
+                    if str(current or "") != new_val:
+                        std_updates[attr] = new_val
+
+        # Optional: validate status
+        if "status" in std_updates:
+            val = std_updates["status"].strip().lower()
+            if val not in {"active", "draft", "archived"}:
+                product_save_logs.append(
+                    f"⚠️ Skipped invalid status '{std_updates['status']}'. Use active/draft/archived."
+                )
+                std_updates.pop("status", None)
+            else:
+                std_updates["status"] = val
+
+        # --- Save standard fields ---
+        if std_updates:
+            # Normalize tags BEFORE saving
+            if "tags" in std_updates:
+                std_updates["tags"] = ", ".join(
+                    [t.strip() for t in str(std_updates["tags"]).split(",") if t.strip()]
+                )
+
+            # Apply updates to the product object once
+            for attr, v in std_updates.items():
+                setattr(selected_product, attr, v)
+
+            # Save, with clearer 422 handling and a key=value success log
+            try:
+                selected_product.save()
+                saved_pairs = [f"{k}='{v}'" for k, v in std_updates.items()]
+                product_save_logs.append("✅ Saved standard fields: " + ", ".join(saved_pairs))
+                time.sleep(0.6)
+            except Exception as e:
+                msg = str(e)
+                if "422" in msg:
+                    product_save_logs.append(
+                        f"❌ Error saving standard fields (422 Unprocessable Entity): {e} — "
+                        "check required fields and valid values (e.g., status active/draft/archived)."
+                    )
+                else:
+                    product_save_logs.append(
+                        f"❌ Error saving standard fields: {e} — "
+                        "check that required fields are valid for this product type."
+                    )
+
+    except Exception as e:
+        product_save_logs.append(f"❌ Error preparing standard field saves: {e}")
+
+
+    
     if "edited_df" in locals() and edited_df is not None:
         updated_product_sync_keys = []
         row_lookup = {row["key"]: row["metafield_obj"] for row in product_fields}
