@@ -4,8 +4,9 @@ import pandas as pd
 import json
 import time
 from pyactiveresource.connection import ClientError
-from update_app import run_update_app
+# from update_app import run_update_app  # unused
 from update_app import sync_product_fields
+
 
 # --- Set wide layout ---
 st.set_page_config(layout="wide")
@@ -137,6 +138,11 @@ state_key = f"products_{store_key}"
 if state_key not in st.session_state:
     with st.spinner(f"Loading products from {store_label}..."):
         st.session_state[state_key] = get_all_products()
+
+# Allow manual refresh
+if st.button("🔄 Refresh product list"):
+    st.session_state.pop(state_key, None)
+    st.rerun()
 
 products = st.session_state[state_key]
 if not products:
