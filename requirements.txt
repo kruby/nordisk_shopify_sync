@@ -1,3 +1,5 @@
-shopifyapi
+pandas
+XlsxWriter
 streamlit
-python-dotenv
+shopifyapi
+pyactiveresource
