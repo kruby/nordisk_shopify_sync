@@ -244,12 +244,22 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
 def make_xlsx_download(products_df, variants_df, store_key, category_label):
     """
     Write the two DataFrames into an in-memory XLSX with 2 sheets.
-    Only columns with any data remain, thanks to build_category_export.
+    Uses XlsxWriter to avoid openpyxl dependency issues.
     """
+    from io import BytesIO
     buf = BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        (products_df or pd.DataFrame()).to_excel(writer, index=False, sheet_name="Products")
-        (variants_df or pd.DataFrame()).to_excel(writer, index=False, sheet_name="Variants")
+    try:
+        # Use XlsxWriter for writing (creation) — no need for openpyxl
+        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+            (products_df or pd.DataFrame()).to_excel(writer, index=False, sheet_name="Products")
+            (variants_df or pd.DataFrame()).to_excel(writer, index=False, sheet_name="Variants")
+    except Exception as e:
+        # Helpful message in the UI if the engine isn't available
+        st.error(
+            "Failed to build the Excel file. Make sure 'XlsxWriter' is installed "
+            "(add it to requirements.txt). Error: {}".format(e)
+        )
+        raise
     buf.seek(0)
     safe_cat = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in category_label)[:60]
     fname = f"export_{store_key}_{safe_cat}_{dt.date.today().isoformat()}.xlsx"
@@ -319,10 +329,9 @@ if build_and_show:
             st.warning("Nothing to export for this category.")
         else:
             fname, data = make_xlsx_download(prod_df, var_df, store_key, selected_type)
-            st.success("Export ready.")
             st.download_button(
                 "Download XLSX",
-                data=data,
+                data=data.getvalue() if hasattr(data, "getvalue") else data,
                 file_name=fname,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
