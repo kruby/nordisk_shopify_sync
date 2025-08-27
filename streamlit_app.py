@@ -3,6 +3,8 @@ import shopify
 import pandas as pd
 import json
 import time
+from io import BytesIO
+import datetime as dt
 from pyactiveresource.connection import ClientError
 # from update_app import run_update_app  # unused
 from update_app import sync_product_fields
@@ -43,8 +45,8 @@ def get_store_config():
 
     store_options = {
         "A-(INT)": {"key": "A", "url": SHOP_URL,     "token": TOKEN,   "label": "Store A"},
-        "B-(DA)":          {"key": "B", "url": STORE_B_URL,  "token": TOKEN_B, "label": "Store B"},
-        "C-(DE)":          {"key": "C", "url": STORE_C_URL,  "token": TOKEN_C, "label": "Store C"},
+        "B-(DA)":  {"key": "B", "url": STORE_B_URL,  "token": TOKEN_B, "label": "Store B"},
+        "C-(DE)":  {"key": "C", "url": STORE_C_URL,  "token": TOKEN_C, "label": "Store C"},
     }
 
     # Determine default index from query param
@@ -122,6 +124,93 @@ def apply_sync_keys_to_category(products, product_type, product_sync_keys, varia
                 time.sleep(2)
                 save_sync_keys(p, product_sync_keys)
 
+# ---------- EXPORT HELPERS ----------
+def metafields_dict(resource, only_synced=False):
+    """
+    Returns a flat dict of metafields for a product or variant:
+    keys look like 'namespace.key' -> str(value)
+    """
+    allowed_keys = set(get_sync_keys(resource)) if only_synced else None
+    out = {}
+    try:
+        for m in resource.metafields():
+            if only_synced and (m.key not in allowed_keys):
+                continue
+            ns = getattr(m, "namespace", "mf")
+            key = f"{ns}.{m.key}"
+            out[key] = "" if m.value is None else str(m.value)
+    except Exception:
+        pass
+    return out
+
+def build_category_export(products_in_type, only_synced=False, include_variants=True):
+    """
+    Build two DataFrames:
+      - products_df: one row per product (standard fields + metafields)
+      - variants_df: one row per variant (standard fields + metafields)
+    """
+    product_rows = []
+    variant_rows = []
+
+    for idx, p in enumerate(products_in_type, 1):
+        # Product row
+        base = {
+            "product_id": p.id,
+            "title": getattr(p, "title", ""),
+            "handle": getattr(p, "handle", ""),
+            "vendor": getattr(p, "vendor", ""),
+            "product_type": getattr(p, "product_type", ""),
+            "status": getattr(p, "status", ""),
+            "tags": ", ".join(p.tags) if isinstance(getattr(p, "tags", ""), list) else (getattr(p, "tags", "") or ""),
+            "created_at": getattr(p, "created_at", ""),
+            "updated_at": getattr(p, "updated_at", ""),
+        }
+        base.update(metafields_dict(p, only_synced=only_synced))
+        product_rows.append(base)
+
+        # Variant rows (optional)
+        if include_variants:
+            for v in getattr(p, "variants", []):
+                vbase = {
+                    "product_id": p.id,
+                    "product_title": getattr(p, "title", ""),
+                    "variant_id": v.id,
+                    "variant_title": getattr(v, "title", ""),
+                    "sku": getattr(v, "sku", ""),
+                    "barcode": getattr(v, "barcode", ""),
+                    "price": getattr(v, "price", ""),
+                    "compare_at_price": getattr(v, "compare_at_price", ""),
+                    "position": getattr(v, "position", ""),
+                    "option1": getattr(v, "option1", ""),
+                    "option2": getattr(v, "option2", ""),
+                    "option3": getattr(v, "option3", ""),
+                }
+                vbase.update(metafields_dict(v, only_synced=only_synced))
+                variant_rows.append(vbase)
+                time.sleep(0.4)  # gentle on rate limits
+
+        if idx % 10 == 0:
+            time.sleep(0.2)
+
+    products_df = pd.DataFrame(product_rows) if product_rows else pd.DataFrame()
+    variants_df = pd.DataFrame(variant_rows) if variant_rows else pd.DataFrame()
+    return products_df, variants_df
+
+def make_xlsx_download(products_df, variants_df, store_key, category_label):
+    """
+    Write the two DataFrames into an in-memory XLSX with 2 sheets.
+    Returns (filename, buffer)
+    """
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        (products_df or pd.DataFrame()).to_excel(writer, index=False, sheet_name="Products")
+        (variants_df or pd.DataFrame()).to_excel(writer, index=False, sheet_name="Variants")
+    buf.seek(0)
+    safe_cat = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in category_label)[:60]
+    fname = f"export_{store_key}_{safe_cat}_{dt.date.today().isoformat()}.xlsx"
+    return fname, buf
+# ---------- END EXPORT HELPERS ----------
+
 # --- Streamlit UI ---
 st.title("🔧 Shopify Product + Variant Metafield Sync Tool")
 
@@ -161,6 +250,44 @@ selected_product = st.selectbox(
 
 show_only_sync = st.checkbox("🔁 Show only synced metafields", value=False)
 
+# ---------- EXPORT UI ----------
+st.markdown("### 📤 Export this Category")
+colx1, colx2, colx3 = st.columns([1, 1, 2])
+with colx1:
+    export_only_synced = st.checkbox(
+        "Only synced metafields",
+        value=show_only_sync,
+        help="Exports only metafields you’ve marked to sync."
+    )
+with colx2:
+    export_include_variants = st.checkbox("Include variants", value=True)
+build_and_show = st.button("⬇️ Build export file")
+
+if build_and_show:
+    with st.spinner("Building export…"):
+        prod_df, var_df = build_category_export(
+            filtered_products,
+            only_synced=export_only_synced,
+            include_variants=export_include_variants,
+        )
+        if prod_df.empty and (var_df.empty or not export_include_variants):
+            st.warning("Nothing to export for this category.")
+        else:
+            fname, data = make_xlsx_download(prod_df, var_df, store_key, selected_type)
+            st.success("Export ready.")
+            st.download_button(
+                "Download XLSX",
+                data=data,
+                file_name=fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            with st.expander("Preview: Products (first 50 rows)"):
+                st.dataframe(prod_df.head(50), use_container_width=True)
+            if export_include_variants and not var_df.empty:
+                with st.expander("Preview: Variants (first 50 rows)"):
+                    st.dataframe(var_df.head(50), use_container_width=True)
+# ---------- END EXPORT UI ----------
+
 # --- Logging containers ---
 product_save_logs = []
 variant_save_logs = []
@@ -188,7 +315,6 @@ with col3:
         st.caption("Cross-store sync is available when viewing Store A.")
         cross_sync_clicked = False
 
-
 # --- Standard Product Fields (editable) ---
 standard_fields_schema = [
     ("title", "Title"),
@@ -202,7 +328,6 @@ standard_fields_schema = [
 def _std_get_val(attr):
     v = getattr(selected_product, attr, "")
     if attr == "tags":
-        # Shopify often stores tags as a comma-separated string
         if isinstance(v, list):
             return ", ".join(v)
         return str(v or "")
@@ -213,7 +338,6 @@ _std_rows = [{"field": label, "attr": attr, "value": _std_get_val(attr)}
 _std_df = pd.DataFrame(_std_rows, columns=["field", "attr", "value"])
 
 st.markdown("### 📦 Standard Product Fields")
-# Show a 2-column editable table (Field | Value). Keep "attr" in session so we know what to save.
 edited_std_df = st.data_editor(
     _std_df.drop(columns=["attr"]),
     num_rows="fixed",
@@ -221,9 +345,6 @@ edited_std_df = st.data_editor(
     key="standard_editor"
 )
 st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_rows}
-
-
-
 
 # --- Product Fields ---
 product_fields = []
@@ -283,13 +404,13 @@ if variant_rows:
 
 # --- Save Logic ---
 if save_clicked:
-    # --- Save standard fields (Title, Handle, Vendor, Product Type, Tags, Status) ---
+    # --- Save standard fields ---
     try:
         std_map = st.session_state.get("_std_attr_map", {})
         std_updates = {}
 
         if "edited_std_df" in locals() or "edited_std_df" in globals():
-            df_std_current = edited_std_df  # from the table we created above
+            df_std_current = edited_std_df
             for _, row in df_std_current.iterrows():
                 field_label = row["field"]
                 new_val = str(row["value"]) if row["value"] is not None else ""
@@ -306,7 +427,6 @@ if save_clicked:
                     if str(current or "") != new_val:
                         std_updates[attr] = new_val
 
-        # Optional: validate status
         if "status" in std_updates:
             val = std_updates["status"].strip().lower()
             if val not in {"active", "draft", "archived"}:
@@ -317,19 +437,13 @@ if save_clicked:
             else:
                 std_updates["status"] = val
 
-        # --- Save standard fields ---
         if std_updates:
-            # Normalize tags BEFORE saving
             if "tags" in std_updates:
                 std_updates["tags"] = ", ".join(
                     [t.strip() for t in str(std_updates["tags"]).split(",") if t.strip()]
                 )
-
-            # Apply updates to the product object once
             for attr, v in std_updates.items():
                 setattr(selected_product, attr, v)
-
-            # Save, with clearer 422 handling and a key=value success log
             try:
                 selected_product.save()
                 saved_pairs = [f"{k}='{v}'" for k, v in std_updates.items()]
@@ -351,8 +465,6 @@ if save_clicked:
     except Exception as e:
         product_save_logs.append(f"❌ Error preparing standard field saves: {e}")
 
-
-    
     if "edited_df" in locals() and edited_df is not None:
         updated_product_sync_keys = []
         row_lookup = {row["key"]: row["metafield_obj"] for row in product_fields}
@@ -361,7 +473,7 @@ if save_clicked:
         for _, row in edited_df.iterrows():
             key = row["key"]
             new_value = row["value"]
-            sync_flag = row["sync"]
+            sync_flag = bool(row["sync"])
             original = row_lookup.get(key)
             original_type = type_lookup.get(key, "string")
 
@@ -373,7 +485,7 @@ if save_clicked:
                     if original_type == "integer":
                         original.value = int(new_value)
                     elif original_type == "boolean":
-                        original.value = new_value.lower() in ["true", "1", "yes"]
+                        original.value = str(new_value).lower() in ["true", "1", "yes"]
                     elif original_type == "json":
                         original.value = json.loads(new_value)
                     elif original_type in ["float", "decimal"]:
@@ -400,7 +512,7 @@ if save_clicked:
             for _, row in rows.iterrows():
                 key = row["key"]
                 new_value = row["value"]
-                sync_flag = row["sync"]
+                sync_flag = bool(row["sync"])
                 original = row_lookup.get((variant_id, key))
                 original_type = type_lookup.get((variant_id, key), "string")
 
@@ -412,7 +524,7 @@ if save_clicked:
                         if original_type == "integer":
                             original.value = int(new_value)
                         elif original_type == "boolean":
-                            original.value = new_value.lower() in ["true", "1", "yes"]
+                            original.value = str(new_value).lower() in ["true", "1", "yes"]
                         elif original_type == "json":
                             original.value = json.loads(new_value)
                         elif original_type in ["float", "decimal"]:
