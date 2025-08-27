@@ -1,5 +1,5 @@
 pandas
 XlsxWriter
 streamlit
-shopifyapi
+ShopifyAPI
 pyactiveresource
