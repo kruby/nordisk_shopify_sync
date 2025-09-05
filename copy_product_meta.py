@@ -1,238 +1,145 @@
+# copy_product_meta.py
 import time
 import requests
 import streamlit as st
-from collections import defaultdict
 
-# --- Shopify Setup ---
-SHOP_URL = st.secrets["STORE_A_URL"]
-STORE_B_URL = st.secrets["STORE_B_URL"]
-STORE_C_URL = st.secrets["STORE_C_URL"]
+# ---------------------------
+# Shopify API helpers
+# ---------------------------
 
-TOKEN = st.secrets["TOKEN_A"]
-TOKEN_B = st.secrets["TOKEN_B"]
-TOKEN_C = st.secrets["TOKEN_C"]
-API_VERSION = "2023-10"
-
-# Optional allow-list to restrict what gets copied
-DEFAULT_ALLOWED = [
-    # Examples:
-    # ("namespace", None),           # copy all keys in namespace
-    # ("namespace", "key_name"),     # copy only specific key
-]
-# Tip: leave empty to copy ALL product-level metafields
-
-# =========================
-# HTTP helpers
-# =========================
-def _headers():
-    return {
-        "X-Shopify-Access-Token": ADMIN_TOKEN,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-def _rest(method, path, params=None, json=None, max_retries=5):
-    url = f"https://{SHOP_DOMAIN}/admin/api/{API_VERSION}{path}"
-    for attempt in range(max_retries):
-        resp = requests.request(method, url, headers=_headers(), params=params, json=json)
+def shopify_get(url, token):
+    """GET request with retry on 429 (rate limit)."""
+    headers = {"X-Shopify-Access-Token": token}
+    while True:
+        resp = requests.get(url, headers=headers)
         if resp.status_code == 429:
-            retry_after = int(resp.headers.get("Retry-After", "2"))
-            time.sleep(retry_after)
-            continue
-        if 500 <= resp.status_code < 600:
-            time.sleep(1.5 * (attempt + 1))
+            time.sleep(2)
             continue
         resp.raise_for_status()
-        return resp
-    resp.raise_for_status()
-    return resp  # not reached
+        return resp.json()
 
-def _paginate_get(path, params=None, key=None):
-    params = params or {}
-    params["limit"] = 250
-    out = []
-    next_page_info = None
+def shopify_post(url, token, payload):
+    """POST request with retry on 429 (rate limit)."""
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
     while True:
-        if next_page_info:
-            params["page_info"] = next_page_info
-        resp = _rest("GET", path, params=params)
-        data = resp.json()
-        if key:
-            out.extend(data.get(key, []))
+        resp = requests.post(url, headers=headers, json=payload)
+        if resp.status_code == 429:
+            time.sleep(2)
+            continue
+        if resp.status_code in (200, 201):
+            return resp.json()
         else:
-            out.append(data)
-        # parse Link header for page_info
-        link = resp.headers.get("Link", "")
-        next_page_info = None
-        if 'rel="next"' in link:
-            # extract page_info
-            try:
-                part = [p for p in link.split(",") if 'rel="next"' in p][0]
-                # page_info=...> format
-                pi = part.split("page_info=")[1].split(">")[0]
-                next_page_info = pi
-            except Exception:
-                next_page_info = None
-        if not next_page_info:
-            break
-    return out
+            resp.raise_for_status()
 
-# =========================
-# Product & metafield ops
-# =========================
-def normalize_title(s: str) -> str:
+def shopify_put(url, token, payload):
+    """PUT request with retry on 429 (rate limit)."""
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    while True:
+        resp = requests.put(url, headers=headers, json=payload)
+        if resp.status_code == 429:
+            time.sleep(2)
+            continue
+        if resp.status_code in (200, 201):
+            return resp.json()
+        else:
+            resp.raise_for_status()
+
+# ---------------------------
+# Logic
+# ---------------------------
+
+def norm_title(s: str) -> str:
+    """Normalize product title for grouping."""
     return (s or "").strip().lower()
 
-def fetch_all_products():
-    # Only fetch fields we need
-    return _paginate_get(f"/products.json", params={"fields": "id,title,handle"}, key="products")
+def get_all_products(shop, token):
+    products = []
+    page_info = None
+    base = f"https://{shop}/admin/api/2025-01/products.json?limit=250"
+    while True:
+        url = base if not page_info else f"{base}&page_info={page_info}"
+        resp = shopify_get(url, token)
+        products.extend(resp.get("products", []))
+        if "link" not in resp:
+            break
+        # TODO: handle pagination via Link headers if needed
+        break
+    return products
 
-def fetch_product_metafields(product_id: int):
-    return _paginate_get(f"/products/{product_id}/metafields.json", key="metafields")
+def get_metafields(shop, token, product_id):
+    url = f"https://{shop}/admin/api/2025-01/products/{product_id}/metafields.json"
+    resp = shopify_get(url, token)
+    return resp.get("metafields", [])
 
-def upsert_metafield(product_id: int, ns: str, key: str, value, type_str: str, existing_by_ns_key):
-    # If it exists -> PUT, else -> POST
-    mf = existing_by_ns_key.get((ns, key))
-    payload = {"metafield": {"namespace": ns, "key": key, "type": type_str, "value": value}}
-    if mf:
-        mf_id = mf["id"]
-        _rest("PUT", f"/metafields/{mf_id}.json", json=payload)
-        return "updated"
+def upsert_metafield(shop, token, product_id, mf):
+    # Try update if id exists, else create
+    if "id" in mf:
+        url = f"https://{shop}/admin/api/2025-01/metafields/{mf['id']}.json"
+        return shopify_put(url, token, {"metafield": mf})
     else:
-        payload["metafield"]["owner_resource"] = "product"
-        payload["metafield"]["owner_id"] = product_id
-        _rest("POST", f"/metafields.json", json=payload)
-        return "created"
+        url = f"https://{shop}/admin/api/2025-01/products/{product_id}/metafields.json"
+        return shopify_post(url, token, {"metafield": mf})
 
-def build_allow_predicate(allowed):
-    if not allowed:
-        return lambda ns, key: True
-    allowed_set = set(allowed)
-    whole_ns = {ns for ns, k in allowed if k is None}
-    def _ok(ns, key):
-        return (ns, key) in allowed_set or ns in whole_ns
-    return _ok
-
-# =========================
+# ---------------------------
 # Streamlit UI
-# =========================
-st.subheader("Copy product metafields to products with the same name (within Shop A)")
-st.caption("Find duplicate product titles and copy product-level metafields from a chosen donor to the others.")
+# ---------------------------
 
-with st.expander("Options", expanded=True):
-    allowed_input = st.text_area(
-        "Allowed namespaces/keys (optional)",
-        help="One per line as 'namespace' or 'namespace.key'. Leave empty to copy ALL product-level metafields.",
-        value=""
-    )
-    DRY_RUN = st.checkbox("Dry run (preview only)", value=True)
-    donor_strategy = st.selectbox(
-        "Donor selection strategy per title",
-        ["Most metafields", "Oldest product ID", "Newest product ID"],
-    )
+def run():
+    st.write("This tool copies product-level metafields to all products with the same title (within Shop A).")
 
-def parse_allowed(text):
-    if not text.strip():
-        return []
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    parsed = []
-    for ln in lines:
-        if "." in ln:
-            ns, key = ln.split(".", 1)
-            parsed.append((ns.strip(), key.strip()))
-        else:
-            parsed.append((ln.strip(), None))
-    return parsed
+    shop = st.secrets["SHOP_A_DOMAIN"]
+    token = st.secrets["SHOP_A_TOKEN"]
 
-if st.button("Scan & Copy"):
-    with st.spinner("Fetching products…"):
-        products = fetch_all_products()
+    allowed_namespaces = st.text_area(
+        "Allowed namespaces (comma-separated, leave blank for all):",
+        value="",
+    ).split(",")
 
-    # Group by normalized title
-    groups = defaultdict(list)
-    for p in products:
-        groups[normalize_title(p["title"])].append(p)
+    dry_run = st.checkbox("Dry run (don’t write changes)", value=True)
 
-    # Keep only groups with duplicates
-    dup_groups = {t: lst for t, lst in groups.items() if len(lst) > 1}
+    if st.button("Start duplicate metafield sync"):
+        st.write("Fetching products...")
+        products = get_all_products(shop, token)
 
-    if not dup_groups:
-        st.success("No duplicate product titles found. Nothing to copy.")
-        st.stop()
+        groups = {}
+        for p in products:
+            groups.setdefault(norm_title(p["title"]), []).append(p)
 
-    st.write(f"Found **{len(dup_groups)}** duplicate title group(s).")
-
-    allowed = parse_allowed(allowed_input)
-    can_copy = build_allow_predicate(allowed)
-
-    results = []
-    for title_norm, plist in dup_groups.items():
-        # Choose donor
-        if donor_strategy == "Most metafields":
-            mf_counts = []
-            for p in plist:
-                mfs = fetch_product_metafields(p["id"])
-                mf_counts.append((p, mfs, len(mfs)))
-            # pick product with most metafields
-            donor_p, donor_mfs, _ = sorted(mf_counts, key=lambda t: t[2], reverse=True)[0]
-        elif donor_strategy == "Oldest product ID":
-            donor_p = sorted(plist, key=lambda p: p["id"])[0]
-            donor_mfs = fetch_product_metafields(donor_p["id"])
-        else:
-            donor_p = sorted(plist, key=lambda p: p["id"], reverse=True)[0]
-            donor_mfs = fetch_product_metafields(donor_p["id"])
-
-        # Index donor metafields (product-level only)
-        donor_mfs = [m for m in donor_mfs if m.get("owner_resource") == "product" or True]  # product endpoint already filters
-        if allowed:
-            donor_mfs = [m for m in donor_mfs if can_copy(m["namespace"], m["key"])]
-
-        # Prepare map for quick lookup by (ns,key)
-        donor_by_ns_key = {(m["namespace"], m["key"]): m for m in donor_mfs}
-
-        # Copy to others in group
-        for tgt in plist:
-            if tgt["id"] == donor_p["id"]:
+        results = []
+        for title, prods in groups.items():
+            if len(prods) < 2:
                 continue
-            tgt_mfs = fetch_product_metafields(tgt["id"])
-            tgt_by_ns_key = {(m["namespace"], m["key"]): m for m in tgt_mfs}
 
-            actions = []
-            for (ns, key), mf in donor_by_ns_key.items():
-                val = mf["value"]
-                typ = mf["type"]
-                exists = (ns, key) in tgt_by_ns_key
-                action = "update" if exists else "create"
-                actions.append((ns, key, action, typ, val))
+            # Pick donor = product with most metafields
+            mf_counts = [(len(get_metafields(shop, token, p["id"])), p) for p in prods]
+            donor = max(mf_counts, key=lambda x: x[0])[1]
+            donor_mfs = get_metafields(shop, token, donor["id"])
 
-            # Execute
-            changed = []
-            if not DRY_RUN:
-                for ns, key, action, typ, val in actions:
-                    status = upsert_metafield(tgt["id"], ns, key, val, typ, tgt_by_ns_key)
-                    changed.append((ns, key, status))
-                    # Simple, polite pacing
-                    time.sleep(0.05)
-            else:
-                changed = [(ns, key, "would_" + action) for ns, key, action, typ, val in actions]
+            for p in prods:
+                if p["id"] == donor["id"]:
+                    continue
+                target_mfs = get_metafields(shop, token, p["id"])
+                target_map = {(mf["namespace"], mf["key"]): mf for mf in target_mfs}
 
-            results.append({
-                "title": plist[0]["title"],
-                "donor_id": donor_p["id"],
-                "target_id": tgt["id"],
-                "changes": changed,
-            })
+                for mf in donor_mfs:
+                    if allowed_namespaces != [""] and mf["namespace"] not in allowed_namespaces:
+                        continue
+                    key = (mf["namespace"], mf["key"])
+                    new_mf = {
+                        "namespace": mf["namespace"],
+                        "key": mf["key"],
+                        "type": mf["type"],
+                        "value": mf["value"],
+                        "owner_resource": "product",
+                        "owner_id": p["id"],
+                    }
+                    if key in target_map:
+                        new_mf["id"] = target_map[key]["id"]
 
-    # Summarize
-    total_ops = sum(len(r["changes"]) for r in results)
-    if DRY_RUN:
-        st.info(f"Dry run complete. {len(results)} target products affected; {total_ops} metafield operations would be performed.")
-    else:
-        st.success(f"Done. {len(results)} target products updated; {total_ops} metafields created/updated.")
+                    if not dry_run:
+                        upsert_metafield(shop, token, p["id"], new_mf)
 
-    # Optional: show a compact log
-    with st.expander("Details"):
-        for r in results:
-            st.write(f'**Title:** {r["title"]} | Donor: {r["donor_id"]} → Target: {r["target_id"]}')
-            for ns, key, status in r["changes"]:
-                st.write(f"- `{ns}.{key}`: {status}")
+                results.append(f"Copied metafields from {donor['title']} ({donor['id']}) → {p['id']}")
+
+        st.success("Done")
+        st.write(results)
