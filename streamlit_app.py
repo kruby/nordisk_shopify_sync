@@ -459,8 +459,8 @@ if product_fields:
 else:
     edited_df = None
 
-# ---------- Copy Product Metafields ----------
-st.subheader("Duplicate Product Metafield Sync")
+# ... inside your product metafields section:
+st.subheader("Copy Product Metafield Sync")
 run_copy_product_meta()
 
 
