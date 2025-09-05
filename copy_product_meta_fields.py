@@ -3,12 +3,15 @@ import requests
 import streamlit as st
 from collections import defaultdict
 
-# =========================
-# Settings / Secrets
-# =========================
-API_VERSION = st.secrets.get("SHOPIFY_API_VERSION", "2024-10")  # keep configurable
-SHOP_DOMAIN = st.secrets["SHOP_A_DOMAIN"]                        # e.g. "yourstore.myshopify.com"
-ADMIN_TOKEN = st.secrets["SHOP_A_TOKEN"]                         # Admin API access token
+# --- Shopify Setup ---
+SHOP_URL = st.secrets["STORE_A_URL"]
+STORE_B_URL = st.secrets["STORE_B_URL"]
+STORE_C_URL = st.secrets["STORE_C_URL"]
+
+TOKEN = st.secrets["TOKEN_A"]
+TOKEN_B = st.secrets["TOKEN_B"]
+TOKEN_C = st.secrets["TOKEN_C"]
+API_VERSION = "2023-10"
 
 # Optional allow-list to restrict what gets copied
 DEFAULT_ALLOWED = [
