@@ -8,6 +8,8 @@ import datetime as dt
 from pyactiveresource.connection import ClientError
 # from update_app import run_update_app  # unused
 from update_app import sync_product_fields
+from copy_product_meta_fields.py import duplicate_metafields
+
 
 # =========================
 # App & Shopify Setup
