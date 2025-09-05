@@ -107,23 +107,73 @@ def get_all_products():
     # Use cached fetch keyed by current store creds
     return get_all_products_cached(store_cfg["url"], store_cfg["token"])
 
-# ---- Explicit metafield finders (avoid mixin) ----
-def find_product_metafields(product_id, **kwargs):
-    return shopify.Metafield.find(resource="products", resource_id=product_id, **kwargs)
+# ---- Explicit metafield finders (avoid mixin) + pagination ----
+def find_product_metafields_all(product_id, **kwargs):
+    page = shopify.Metafield.find(resource="products", resource_id=product_id, limit=250, **kwargs)
+    items = []
+    while page:
+        items.extend(page)
+        try:
+            page = page.next_page()
+        except Exception:
+            break
+    return items
 
-def find_variant_metafields(variant_id, **kwargs):
-    return shopify.Metafield.find(resource="variants", resource_id=variant_id, **kwargs)
+def find_variant_metafields_all(variant_id, **kwargs):
+    page = shopify.Metafield.find(resource="variants", resource_id=variant_id, limit=250, **kwargs)
+    items = []
+    while page:
+        items.extend(page)
+        try:
+            page = page.next_page()
+        except Exception:
+            break
+    return items
 
 def _metafields_for_resource(resource, **kwargs):
     """Fetch metafields for either a product or a variant without using the mixin."""
     try:
         if isinstance(resource, shopify.Product):
-            return find_product_metafields(resource.id, **kwargs) or []
+            return find_product_metafields_all(resource.id, **kwargs) or []
         else:
             # Assume variant for anything else passed here
-            return find_variant_metafields(resource.id, **kwargs) or []
+            return find_variant_metafields_all(resource.id, **kwargs) or []
     except Exception:
         return []
+
+def _product_metafield_map(product):
+    """
+    Return {(namespace, key): metafield_obj} for a product.
+    Uses explicit Metafield.find to avoid mixins.
+    """
+    m = {}
+    for mf in find_product_metafields_all(product.id):
+        ns = getattr(mf, "namespace", None)
+        k = getattr(mf, "key", None)
+        if ns and k:
+            m[(ns, k)] = mf
+    return m
+
+def _normalize_value_for_type(value, mtype):
+    """
+    Convert raw value to the appropriate python type for the declared metafield type.
+    We keep it conservative; only coerce when safe.
+    """
+    try:
+        if mtype in ("integer", "number", "float", "decimal"):
+            return int(value) if mtype == "integer" else float(value)
+        if mtype == "boolean":
+            return str(value).lower() in ("true", "1", "yes", "y", "t")
+        if mtype == "json":
+            if isinstance(value, (dict, list)):
+                return value
+            try:
+                return json.loads(value)
+            except Exception:
+                return value
+        return "" if value is None else str(value)
+    except Exception:
+        return value
 
 def get_sync_keys(resource):
     """Return list of keys marked for sync (stored in SYNC_NAMESPACE/SYNC_KEY json)."""
@@ -173,6 +223,99 @@ def apply_sync_keys_to_category(products, product_type, product_sync_keys, varia
             except Exception:
                 time.sleep(2)
                 save_sync_keys(p, product_sync_keys)
+
+# ---------- Copy logic ----------
+def copy_product_metafields(
+    donor_product,
+    receiver_product,
+    keys_to_copy=None,              # list[str] (without namespace) or None
+    namespace_filter=None,          # str | list[str] | None
+    overwrite=False,                # do not touch existing if False
+    only_synced=False,              # copy only keys marked for sync on donor
+    dry_run=False,                  # simulate changes without saving
+):
+    logs = []
+    ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
+
+    donor_metafields = list(find_product_metafields_all(donor_product.id))
+    receiver_map = _product_metafield_map(receiver_product)
+
+    synced_keyset = set(get_sync_keys(donor_product)) if only_synced else None
+
+    total = copied = skipped_exists = skipped_ns = skipped_key = skipped_unsynced = errors = 0
+
+    for dm in donor_metafields:
+        ns = getattr(dm, "namespace", None)
+        key = getattr(dm, "key", None)
+        if not ns or not key:
+            continue
+
+        if ns_filter and ns not in ns_filter:
+            skipped_ns += 1
+            continue
+
+        if synced_keyset is not None and key not in synced_keyset:
+            skipped_unsynced += 1
+            continue
+
+        if keys_to_copy is not None and key not in set(keys_to_copy):
+            skipped_key += 1
+            continue
+
+        total += 1
+        receiver_existing = receiver_map.get((ns, key))
+
+        if receiver_existing and not overwrite:
+            skipped_exists += 1
+            continue
+
+        mtype = getattr(dm, "type", None) or "string"
+        value = _normalize_value_for_type(getattr(dm, "value", None), mtype)
+
+        try:
+            if dry_run:
+                action = "UPDATE" if receiver_existing else "CREATE"
+                logs.append(f"[DRY RUN] {action} {ns}.{key} = {value!r} (type={mtype})")
+                copied += 1
+                continue
+
+            if receiver_existing:
+                receiver_existing.value = value
+                try:
+                    if getattr(receiver_existing, "type", None) in (None, "", "string"):
+                        receiver_existing.type = mtype
+                except Exception:
+                    pass
+                ok = receiver_existing.save()
+            else:
+                mf = shopify.Metafield()
+                mf.namespace = ns
+                mf.key = key
+                mf.type = mtype
+                mf.value = value
+                mf.owner_id = receiver_product.id
+                mf.owner_resource = "product"
+                ok = mf.save()
+
+            if ok:
+                copied += 1
+            else:
+                errors += 1
+                logs.append(f"❌ Failed to save '{ns}.{key}' on receiver {receiver_product.id}")
+            time.sleep(0.5)
+        except Exception as e:
+            errors += 1
+            logs.append(f"❌ Error copying '{ns}.{key}': {e}")
+
+    summary = (
+        f"Copied {copied}/{total} metafields "
+        f"(skipped existing: {skipped_exists}, skipped by namespace: {skipped_ns}, "
+        f"skipped by key filter: {skipped_key}, skipped not-synced: {skipped_unsynced}, errors: {errors})."
+    )
+    logs.insert(0, f"🧬 Metafield copy: donor {donor_product.id} → receiver {receiver_product.id} "
+                   f"{'(DRY RUN)' if dry_run else ''}")
+    logs.append(summary)
+    return {"summary": summary, "logs": logs}
 
 # ---------- EXPORT HELPERS ----------
 def _is_effectively_empty(v):
@@ -399,6 +542,100 @@ if build_and_show:
                     st.dataframe(var_df.head(50), use_container_width=True)
 # ---------- END EXPORT UI ----------
 
+# ---------- Copy Product Metafields UI ----------
+st.markdown("### 🧬 Copy Product Metafields")
+
+# Choose donor/receiver from *any* products (not just filtered category)
+colcp1, colcp2 = st.columns(2)
+with colcp1:
+    donor_product = st.selectbox(
+        "Donor product (copy FROM)",
+        products,
+        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+        key=f"donor_select_{store_key}",
+    )
+with colcp2:
+    receiver_product = st.selectbox(
+        "Receiver product (copy TO)",
+        products,
+        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+        key=f"receiver_select_{store_key}",
+    )
+
+# Fetch donor keys for selection (namespaced & plain)
+donor_metafields_list = list(find_product_metafields_all(getattr(donor_product, "id", 0))) if donor_product else []
+donor_keys_plain = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
+donor_namespaced = sorted({f"{getattr(m, 'namespace', 'mf')}.{getattr(m, 'key', '')}" for m in donor_metafields_list if getattr(m, "key", "")})
+
+with st.expander("Advanced copy options", expanded=False):
+    ns_filter_text = st.text_input(
+        "Namespace filter (comma-separated, leave blank for all)",
+        value="",
+        help="Example: custom, seo, my_namespace",
+        key=f"ns_filter_{store_key}",
+    )
+    namespace_filter = [s.strip() for s in ns_filter_text.split(",") if s.strip()] or None
+
+    overwrite_existing = st.checkbox(
+        "Overwrite existing receiver metafields",
+        value=False,
+        help="If unchecked, existing (namespace,key) pairs on the receiver are not changed.",
+        key=f"overwrite_{store_key}",
+    )
+
+    st.caption("Select specific keys (by key name, not namespace) or leave empty to copy all keys in the chosen namespaces.")
+    keys_to_copy = st.multiselect(
+        "Keys to copy",
+        donor_keys_plain,
+        default=[],
+        key=f"keys_to_copy_{store_key}",
+    )
+
+    only_synced_keys = st.checkbox(
+        "Copy only keys marked for sync on donor",
+        value=False,
+        help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
+        key=f"only_synced_{store_key}",
+    )
+
+    dry_run = st.checkbox(
+        "Dry run (no writes)",
+        value=False,
+        help="Preview what would be created/updated without saving anything.",
+        key=f"dry_run_{store_key}",
+    )
+
+copy_clicked = st.button("➡️ Copy metafields from donor → receiver", type="primary", use_container_width=False)
+
+if copy_clicked:
+    if not donor_product or not receiver_product:
+        st.warning("Pick both a donor and receiver product.")
+    elif donor_product.id == receiver_product.id:
+        st.warning("Donor and receiver must be different products.")
+    else:
+        # ensure session is live right before API calls
+        connect_to_store(store_cfg["url"], store_cfg["token"])
+        with st.spinner("Copying metafields..."):
+            result = copy_product_metafields(
+                donor_product=donor_product,
+                receiver_product=receiver_product,
+                keys_to_copy=keys_to_copy if keys_to_copy else None,
+                namespace_filter=namespace_filter,
+                overwrite=overwrite_existing,
+                only_synced=only_synced_keys,
+                dry_run=dry_run,
+            )
+            if dry_run:
+                st.info("Dry run complete — no changes saved.")
+            st.success(result["summary"])
+            with st.expander("Copy details", expanded=False):
+                for line in result["logs"]:
+                    st.write(line)
+
+if donor_namespaced:
+    st.caption("Donor has the following namespaced keys available:")
+    st.code("\n".join(donor_namespaced), language="text")
+
 # ---------- Info & Actions ----------
 product_save_logs = []
 variant_save_logs = []
@@ -459,7 +696,7 @@ st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_r
 # ---------- Product Metafields ----------
 product_fields = []
 sync_keys = get_sync_keys(selected_product)
-existing_fields = {m.key: m for m in find_product_metafields(selected_product.id)}
+existing_fields = {m.key: m for m in find_product_metafields_all(selected_product.id)}
 for key, m in existing_fields.items():
     if show_only_sync and key not in sync_keys:
         continue
@@ -491,7 +728,7 @@ for variant in selected_product.variants:
         variant_map[variant.id] = variant
         variant_sync_keys = get_sync_keys(variant)
         variant_sync_map[variant.id] = variant_sync_keys
-        existing_fields = {m.key: m for m in find_variant_metafields(variant.id)}
+        existing_fields = {m.key: m for m in find_variant_metafields_all(variant.id)}
         for key, m in existing_fields.items():
             if show_only_sync and key not in variant_sync_keys:
                 continue
