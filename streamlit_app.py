@@ -6,7 +6,6 @@ import time
 from io import BytesIO
 import datetime as dt
 from pyactiveresource.connection import ClientError
-# from update_app import run_update_app  # unused
 from update_app import sync_product_fields
 from copy_product_meta import run as run_copy_product_meta
 
