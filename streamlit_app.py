@@ -6,8 +6,8 @@ import time
 from io import BytesIO
 import datetime as dt
 from pyactiveresource.connection import ClientError
+# from update_app import run_update_app  # unused
 from update_app import sync_product_fields
-from copy_product_meta import run as run_copy_product_meta
 
 # =========================
 # App & Shopify Setup
@@ -457,11 +457,6 @@ if product_fields:
     edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key=f"product_editor_{store_key}")
 else:
     edited_df = None
-
-# ... inside your product metafields section:
-st.subheader("Copy Product Metafield Sync")
-run_copy_product_meta()
-
 
 # ---------- Variant Metafields ----------
 variant_rows = []
