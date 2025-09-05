@@ -89,22 +89,19 @@ def connect_to_store(shop_url=None, token=None):
 
 @st.cache_data(show_spinner=False)
 def get_all_products_cached(shop_url, token):
-    # Create & tear down a temp session, so cache is per-store and isolated
     url = shop_url if str(shop_url).startswith("https://") else f"https://{shop_url}"
     session = shopify.Session(url, API_VERSION, token)
     shopify.ShopifyResource.activate_session(session)
-    try:
-        all_products = []
-        page = shopify.Product.find(limit=250)
-        while page:
-            all_products.extend(page)
-            try:
-                page = page.next_page()
-            except Exception:
-                break
-        return all_products
-    finally:
-        shopify.ShopifyResource.clear_session()
+    # DO NOT clear the session here
+    all_products = []
+    page = shopify.Product.find(limit=250)
+    while page:
+        all_products.extend(page)
+        try:
+            page = page.next_page()
+        except Exception:
+            break
+    return all_products
 
 def get_all_products():
     # Use cached fetch keyed by current store creds
