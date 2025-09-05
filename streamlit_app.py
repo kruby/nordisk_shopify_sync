@@ -107,10 +107,29 @@ def get_all_products():
     # Use cached fetch keyed by current store creds
     return get_all_products_cached(store_cfg["url"], store_cfg["token"])
 
-def get_sync_keys(resource):
+# ---- Explicit metafield finders (avoid mixin) ----
+def find_product_metafields(product_id, **kwargs):
+    return shopify.Metafield.find(resource="products", resource_id=product_id, **kwargs)
+
+def find_variant_metafields(variant_id, **kwargs):
+    return shopify.Metafield.find(resource="variants", resource_id=variant_id, **kwargs)
+
+def _metafields_for_resource(resource, **kwargs):
+    """Fetch metafields for either a product or a variant without using the mixin."""
     try:
-        for m in resource.metafields():
-            if m.namespace == SYNC_NAMESPACE and m.key == SYNC_KEY:
+        if isinstance(resource, shopify.Product):
+            return find_product_metafields(resource.id, **kwargs) or []
+        else:
+            # Assume variant for anything else passed here
+            return find_variant_metafields(resource.id, **kwargs) or []
+    except Exception:
+        return []
+
+def get_sync_keys(resource):
+    """Return list of keys marked for sync (stored in SYNC_NAMESPACE/SYNC_KEY json)."""
+    try:
+        for m in _metafields_for_resource(resource):
+            if getattr(m, "namespace", None) == SYNC_NAMESPACE and getattr(m, "key", None) == SYNC_KEY:
                 try:
                     return json.loads(m.value)
                 except Exception:
@@ -120,18 +139,24 @@ def get_sync_keys(resource):
     return []
 
 def save_sync_keys(resource, keys):
+    """
+    Create/update the metafield that stores the list of keys to sync.
+    Avoids resource.metafields() mixin calls.
+    """
     try:
-        meta = next(
-            (m for m in resource.metafields() if m.namespace == SYNC_NAMESPACE and m.key == SYNC_KEY),
-            None
-        )
-        if not meta:
-            meta = shopify.Metafield()
-            meta.namespace = SYNC_NAMESPACE
-            meta.key = SYNC_KEY
-            meta.owner_id = resource.id
-            meta.owner_resource = "product" if isinstance(resource, shopify.Product) else "variant"
-            meta.type = "json"
+        # Find existing sync metafield (if any)
+        existing = None
+        for m in _metafields_for_resource(resource):
+            if getattr(m, "namespace", None) == SYNC_NAMESPACE and getattr(m, "key", None) == SYNC_KEY:
+                existing = m
+                break
+
+        meta = existing or shopify.Metafield()
+        meta.namespace = SYNC_NAMESPACE
+        meta.key = SYNC_KEY
+        meta.owner_id = resource.id
+        meta.owner_resource = "product" if isinstance(resource, shopify.Product) else "variant"
+        meta.type = "json"
         meta.value = json.dumps(keys)
         return meta.save()
     except Exception:
@@ -184,7 +209,7 @@ def metafields_dict(resource, only_synced=False):
     allowed_keys = set(get_sync_keys(resource)) if only_synced else None
     out = {}
     try:
-        for m in resource.metafields():
+        for m in _metafields_for_resource(resource):
             if only_synced and (m.key not in allowed_keys):
                 continue
             ns = getattr(m, "namespace", "mf")
@@ -434,7 +459,7 @@ st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_r
 # ---------- Product Metafields ----------
 product_fields = []
 sync_keys = get_sync_keys(selected_product)
-existing_fields = {m.key: m for m in selected_product.metafields()}
+existing_fields = {m.key: m for m in find_product_metafields(selected_product.id)}
 for key, m in existing_fields.items():
     if show_only_sync and key not in sync_keys:
         continue
@@ -466,7 +491,7 @@ for variant in selected_product.variants:
         variant_map[variant.id] = variant
         variant_sync_keys = get_sync_keys(variant)
         variant_sync_map[variant.id] = variant_sync_keys
-        existing_fields = {m.key: m for m in variant.metafields()}
+        existing_fields = {m.key: m for m in find_variant_metafields(variant.id)}
         for key, m in existing_fields.items():
             if show_only_sync and key not in variant_sync_keys:
                 continue
