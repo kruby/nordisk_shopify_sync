@@ -1,7 +1,18 @@
-# copy_product_meta.py
-import time
-import requests
 import streamlit as st
+import shopify
+import json
+import time
+from pyactiveresource.connection import ClientError
+
+# --- Shopify Setup ---
+SHOP_URL = st.secrets["STORE_A_URL"]
+STORE_B_URL = st.secrets["STORE_B_URL"]
+STORE_C_URL = st.secrets["STORE_C_URL"]
+
+TOKEN = st.secrets["TOKEN_A"]
+TOKEN_B = st.secrets["TOKEN_B"]
+TOKEN_C = st.secrets["TOKEN_C"]
+API_VERSION = "2023-10"
 
 # ---------------------------
 # Shopify API helpers
