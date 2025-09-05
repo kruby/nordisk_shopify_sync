@@ -8,8 +8,7 @@ import datetime as dt
 from pyactiveresource.connection import ClientError
 # from update_app import run_update_app  # unused
 from update_app import sync_product_fields
-import copy_product_meta_fields
-
+from copy_product_meta import
 
 # =========================
 # App & Shopify Setup
@@ -462,7 +461,7 @@ else:
 
 # ---------- Copy Product Metafields ----------
 st.subheader("Duplicate Title Metafield Sync")
-copy_product_meta_fields.run()
+copy_product_meta.run()
 
 
 # ---------- Variant Metafields ----------
