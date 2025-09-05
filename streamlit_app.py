@@ -8,7 +8,7 @@ import datetime as dt
 from pyactiveresource.connection import ClientError
 # from update_app import run_update_app  # unused
 from update_app import sync_product_fields
-from copy_product_meta_fields.py import duplicate_metafields
+import copy_product_meta_fields
 
 
 # =========================
@@ -459,6 +459,11 @@ if product_fields:
     edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key=f"product_editor_{store_key}")
 else:
     edited_df = None
+
+# ---------- Copy Product Metafields ----------
+st.subheader("Duplicate Title Metafield Sync")
+copy_product_meta_fields.run()
+
 
 # ---------- Variant Metafields ----------
 variant_rows = []
