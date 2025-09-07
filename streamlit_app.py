@@ -543,94 +543,101 @@ if build_and_show:
 # ---------- END EXPORT UI ----------
 
 # ---------- Copy Product Metafields UI ----------
-st.markdown("### 🧬 Copy Product Metafields")
+with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-# Choose donor/receiver from *any* products (not just filtered category)
-colcp1, colcp2 = st.columns(2)
-with colcp1:
-    donor_product = st.selectbox(
-        "Donor product (copy FROM)",
-        products,
-        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
-        key=f"donor_select_{store_key}",
-    )
-with colcp2:
-    receiver_product = st.selectbox(
-        "Receiver product (copy TO)",
-        products,
-        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
-        key=f"receiver_select_{store_key}",
-    )
+    # Choose donor/receiver from *any* products (not just filtered category)
+    colcp1, colcp2 = st.columns(2)
+    with colcp1:
+        donor_product = st.selectbox(
+            "Donor product (copy FROM)",
+            products,
+            format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+            key=f"donor_select_{store_key}",
+        )
+    with colcp2:
+        receiver_product = st.selectbox(
+            "Receiver product (copy TO)",
+            products,
+            format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+            key=f"receiver_select_{store_key}",
+        )
 
-# Fetch donor keys for selection (namespaced & plain)
-donor_metafields_list = list(find_product_metafields_all(getattr(donor_product, "id", 0))) if donor_product else []
-donor_keys_plain = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
-donor_namespaced = sorted({f"{getattr(m, 'namespace', 'mf')}.{getattr(m, 'key', '')}" for m in donor_metafields_list if getattr(m, "key", "")})
+    # Fetch donor keys for selection (namespaced & plain)
+    donor_metafields_list = list(find_product_metafields_all(getattr(donor_product, "id", 0))) if donor_product else []
+    donor_keys_plain = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
+    donor_namespaced = sorted({f"{getattr(m, 'namespace', 'mf')}.{getattr(m, 'key', '')}" for m in donor_metafields_list if getattr(m, "key", "")})
 
-with st.expander("Advanced copy options", expanded=False):
-    ns_filter_text = st.text_input(
-        "Namespace filter (comma-separated, leave blank for all)",
-        value="",
-        help="Example: custom, seo, my_namespace",
-        key=f"ns_filter_{store_key}",
-    )
-    namespace_filter = [s.strip() for s in ns_filter_text.split(",") if s.strip()] or None
+    with st.expander("Advanced copy options", expanded=False):
+        ns_filter_text = st.text_input(
+            "Namespace filter (comma-separated, leave blank for all)",
+            value="",
+            help="Example: custom, seo, my_namespace",
+            key=f"ns_filter_{store_key}",
+        )
+        namespace_filter = [s.strip() for s in ns_filter_text.split(",") if s.strip()] or None
 
-    overwrite_existing = st.checkbox(
-        "Overwrite existing receiver metafields",
-        value=False,
-        help="If unchecked, existing (namespace,key) pairs on the receiver are not changed.",
-        key=f"overwrite_{store_key}",
-    )
+        overwrite_existing = st.checkbox(
+            "Overwrite existing receiver metafields",
+            value=False,
+            help="If unchecked, existing (namespace,key) pairs on the receiver are not changed.",
+            key=f"overwrite_{store_key}",
+        )
 
-    st.caption("Select specific keys (by key name, not namespace) or leave empty to copy all keys in the chosen namespaces.")
-    keys_to_copy = st.multiselect(
-        "Keys to copy",
-        donor_keys_plain,
-        default=[],
-        key=f"keys_to_copy_{store_key}",
-    )
+        st.caption("Select specific keys (by key name, not namespace) or leave empty to copy all keys in the chosen namespaces.")
+        keys_to_copy = st.multiselect(
+            "Keys to copy",
+            donor_keys_plain,
+            default=[],
+            key=f"keys_to_copy_{store_key}",
+        )
 
-    only_synced_keys = st.checkbox(
-        "Copy only keys marked for sync on donor",
-        value=False,
-        help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
-        key=f"only_synced_{store_key}",
-    )
+        only_synced_keys = st.checkbox(
+            "Copy only keys marked for sync on donor",
+            value=False,
+            help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
+            key=f"only_synced_{store_key}",
+        )
 
-    dry_run = st.checkbox(
-        "Dry run (no writes)",
-        value=False,
-        help="Preview what would be created/updated without saving anything.",
-        key=f"dry_run_{store_key}",
-    )
+        dry_run = st.checkbox(
+            "Dry run (no writes)",
+            value=False,
+            help="Preview what would be created/updated without saving anything.",
+            key=f"dry_run_{store_key}",
+        )
 
-copy_clicked = st.button("➡️ Copy metafields from donor → receiver", type="primary", use_container_width=False)
+        if donor_namespaced:
+            st.caption("Donor has the following namespaced keys available:")
+            st.code("\n".join(donor_namespaced), language="text")
 
-if copy_clicked:
-    if not donor_product or not receiver_product:
-        st.warning("Pick both a donor and receiver product.")
-    elif donor_product.id == receiver_product.id:
-        st.warning("Donor and receiver must be different products.")
-    else:
-        # ensure session is live right before API calls
-        connect_to_store(store_cfg["url"], store_cfg["token"])
-        with st.spinner("Copying metafields..."):
-            result = copy_product_metafields(
-                donor_product=donor_product,
-                receiver_product=receiver_product,
-                keys_to_copy=keys_to_copy if keys_to_copy else None,
-                namespace_filter=namespace_filter,
-                overwrite=overwrite_existing,
-                only_synced=only_synced_keys,
-                dry_run=dry_run,
-            )
-            if dry_run:
-                st.info("Dry run complete — no changes saved.")
-            st.success(result["summary"])
-            with st.expander("Copy details", expanded=False):
-                for line in result["logs"]:
-                    st.write(line)
+    col_btn, _ = st.columns([1, 3])
+    with col_btn:
+        copy_clicked = st.button("➡️ Copy metafields from donor → receiver", type="primary", use_container_width=True)
+
+    if copy_clicked:
+        if not donor_product or not receiver_product:
+            st.warning("Pick both a donor and receiver product.")
+        elif donor_product.id == receiver_product.id:
+            st.warning("Donor and receiver must be different products.")
+        else:
+            # ensure session is live right before API calls
+            connect_to_store(store_cfg["url"], store_cfg["token"])
+            with st.spinner("Copying metafields..."):
+                result = copy_product_metafields(
+                    donor_product=donor_product,
+                    receiver_product=receiver_product,
+                    keys_to_copy=keys_to_copy if keys_to_copy else None,
+                    namespace_filter=namespace_filter,
+                    overwrite=overwrite_existing,
+                    only_synced=only_synced_keys,
+                    dry_run=dry_run,
+                )
+                if dry_run:
+                    st.info("Dry run complete — no changes saved.")
+                st.success(result["summary"])
+                with st.expander("Copy details", expanded=False):
+                    for line in result["logs"]:
+                        st.write(line)
+
 
 if donor_namespaced:
     st.caption("Donor has the following namespaced keys available:")
