@@ -114,11 +114,7 @@ def get_store_config():
         index=default_index,
         help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
     )
-            "Choose which shop to view/edit",
-            keys,
-            index=default_index,
-            help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
-        )
+
 
     cfg = store_options[store_label]
     
