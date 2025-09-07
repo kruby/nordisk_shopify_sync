@@ -108,7 +108,7 @@ def get_store_config():
                 default_index = i
                 break
 
-    col_store_sel, col_store_info = st.columns([2, 3])
+    col_store_sel, _ = st.columns([2, 3])
     with col_store_sel:
         store_label = st.selectbox(
             "Choose which shop to view/edit",
@@ -117,9 +117,6 @@ def get_store_config():
             help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
         )
     cfg = store_options[store_label]
-    with col_store_info:
-        st.info(f"Viewing & editing: **{cfg['label']}**", icon="🏬")
-    
     if not cfg["url"] or not cfg["token"]:
         st.error(f"Missing secrets for {cfg['label']}. Please set {cfg['label']} URL and token in Streamlit secrets.")
         st.stop()
