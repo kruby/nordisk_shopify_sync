@@ -573,55 +573,6 @@ with col_refresh:
         st.session_state.pop(f"products_{store_key}", None)
         st.rerun()
 
-# ---------- EXPORT UI ----------
-with st.expander("📤 Export this Category", expanded=False):
-    # Use the shared toggle state
-    current_only_synced = st.session_state.get(f"show_only_sync_{store_key}", False)
-
-    colx2, colx3 = st.columns([1, 2])
-    with colx2:
-        export_include_variants = st.checkbox(
-            "Include variants",
-            value=True,
-            key=f"export_include_variants_{store_key}",
-        )
-    with colx3:
-        build_and_show = st.button(
-            "⬇️ Build export file",
-            key=f"build_export_{store_key}",
-        )
-
-    st.caption(
-        f"Export will respect **Show only synced metafields = {'ON' if current_only_synced else 'OFF'}** "
-        f"(toggle it under Product Metafields)."
-    )
-
-    if build_and_show:
-        with st.spinner("Building export…"):
-            prod_df, var_df = build_category_export(
-                filtered_products,
-                only_synced=current_only_synced,          # ← use the shared toggle
-                include_variants=export_include_variants,
-            )
-            if prod_df.empty and (var_df.empty or not export_include_variants):
-                st.warning("Nothing to export for this category.")
-            else:
-                fname, data = make_xlsx_download(prod_df, var_df, store_key, selected_type)
-                st.success("Export ready.")
-                st.download_button(
-                    "Download XLSX",
-                    data=data.getvalue() if hasattr(data, "getvalue") else data,
-                    file_name=fname,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_xlsx_{store_key}",
-                )
-                with st.expander("Preview: Products (first 50 rows)"):
-                    st.dataframe(prod_df.head(50), use_container_width=True)
-                if export_include_variants and not var_df.empty:
-                    with st.expander("Preview: Variants (first 50 rows)"):
-                        st.dataframe(var_df.head(50), use_container_width=True)
-# ---------- END EXPORT UI ----------
-
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
@@ -729,6 +680,56 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                     with st.expander(f"Details for receiver {rcv.id}", expanded=False):
                         for line in result["logs"]:
                             st.write(line)
+# ---------- END Product Metafields UI ----------
+
+# ---------- EXPORT UI ----------
+with st.expander("📤 Export this Category", expanded=False):
+    # Use the shared toggle state
+    current_only_synced = st.session_state.get(f"show_only_sync_{store_key}", False)
+
+    colx2, colx3 = st.columns([1, 2])
+    with colx2:
+        export_include_variants = st.checkbox(
+            "Include variants",
+            value=True,
+            key=f"export_include_variants_{store_key}",
+        )
+    with colx3:
+        build_and_show = st.button(
+            "⬇️ Build export file",
+            key=f"build_export_{store_key}",
+        )
+
+    st.caption(
+        f"Export will respect **Show only synced metafields = {'ON' if current_only_synced else 'OFF'}** "
+        f"(toggle it under Product Metafields)."
+    )
+
+    if build_and_show:
+        with st.spinner("Building export…"):
+            prod_df, var_df = build_category_export(
+                filtered_products,
+                only_synced=current_only_synced,          # ← use the shared toggle
+                include_variants=export_include_variants,
+            )
+            if prod_df.empty and (var_df.empty or not export_include_variants):
+                st.warning("Nothing to export for this category.")
+            else:
+                fname, data = make_xlsx_download(prod_df, var_df, store_key, selected_type)
+                st.success("Export ready.")
+                st.download_button(
+                    "Download XLSX",
+                    data=data.getvalue() if hasattr(data, "getvalue") else data,
+                    file_name=fname,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"download_xlsx_{store_key}",
+                )
+                with st.expander("Preview: Products (first 50 rows)"):
+                    st.dataframe(prod_df.head(50), use_container_width=True)
+                if export_include_variants and not var_df.empty:
+                    with st.expander("Preview: Variants (first 50 rows)"):
+                        st.dataframe(var_df.head(50), use_container_width=True)
+# ---------- END EXPORT UI ----------
 
 
 # ---------- Info & Actions ----------
