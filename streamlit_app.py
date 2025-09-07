@@ -34,17 +34,12 @@ SYNC_KEY = "sync_fields"
 # Cached, retry-safe fetch of product metafields for donor UI
 @st.cache_data(ttl=60, show_spinner=False)
 def get_product_metafields_with_retries(product_id: int, **kwargs):
-    """
-    Fetch all product metafields with pagination, retrying on 429s.
-    Cached for 60s to avoid hammering the API while the user clicks around.
-    """
+    """Fetch all product metafields with pagination, retrying on 429s. Cached for 60s."""
     if not product_id:
         return []
-
     backoffs = [0.6, 1.2, 2.0, 3.0]  # seconds
     last_err = None
-
-    for attempt, wait in enumerate(backoffs, start=1):
+    for wait in backoffs:
         try:
             page = shopify.Metafield.find(resource="products", resource_id=product_id, limit=250, **kwargs)
             items = []
@@ -56,25 +51,17 @@ def get_product_metafields_with_retries(product_id: int, **kwargs):
                     break
             return items
         except ClientError as e:
-            msg = str(e)
-            last_err = e
-            # Most common: 429 Too Many Requests -> backoff and retry
+            msg = str(e); last_err = e
             if "429" in msg or "Too Many Requests" in msg:
-                time.sleep(wait)
-                continue
-            # Other client errors: stop early
+                time.sleep(wait); continue
             break
         except Exception as e:
-            last_err = e
-            break
-
-    # If we get here, retries failed
-    st.warning(f"Could not load donor metafields (temporary error). Try again in a moment. Details: {last_err}")
+            last_err = e; break
+    st.warning(f"Could not load donor metafields (temporary error). Try again. Details: {last_err}")
     return []
 
 def _get_query_params():
     """Handle Streamlit's old/new query params APIs safely."""
-    # Newer API
     try:
         qp = st.query_params
         try:
@@ -83,7 +70,6 @@ def _get_query_params():
             pass
     except Exception:
         pass
-    # Older API
     try:
         qp = st.experimental_get_query_params()
         return {k: (v[0] if isinstance(v, list) and v else v) for k, v in qp.items()}
@@ -114,10 +100,7 @@ def get_store_config():
         index=default_index,
         help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
     )
-
-
     cfg = store_options[store_label]
-    
     if not cfg["url"] or not cfg["token"]:
         st.error(f"Missing secrets for {cfg['label']}. Please set {cfg['label']} URL and token in Streamlit secrets.")
         st.stop()
@@ -136,7 +119,6 @@ def get_all_products_cached(shop_url, token):
     url = shop_url if str(shop_url).startswith("https://") else f"https://{shop_url}"
     session = shopify.Session(url, API_VERSION, token)
     shopify.ShopifyResource.activate_session(session)
-    # DO NOT clear the session here
     all_products = []
     page = shopify.Product.find(limit=250)
     while page:
@@ -148,7 +130,6 @@ def get_all_products_cached(shop_url, token):
     return all_products
 
 def get_all_products():
-    # Use cached fetch keyed by current store creds
     return get_all_products_cached(store_cfg["url"], store_cfg["token"])
 
 # ---- Explicit metafield finders (avoid mixin) + pagination ----
@@ -184,16 +165,12 @@ def _metafields_for_resource(resource, **kwargs):
         if isinstance(resource, shopify.Product):
             return find_product_metafields_all(resource.id, **kwargs) or []
         else:
-            # Assume variant for anything else passed here
             return find_variant_metafields_all(resource.id, **kwargs) or []
     except Exception:
         return []
 
 def _product_metafield_map(product):
-    """
-    Return {(namespace, key): metafield_obj} for a product.
-    Uses explicit Metafield.find to avoid mixins.
-    """
+    """Return {(namespace, key): metafield_obj} for a product."""
     m = {}
     for mf in find_product_metafields_all(product.id):
         ns = getattr(mf, "namespace", None)
@@ -203,10 +180,7 @@ def _product_metafield_map(product):
     return m
 
 def _normalize_value_for_type(value, mtype):
-    """
-    Convert raw value to the appropriate python type for the declared metafield type.
-    We keep it conservative; only coerce when safe.
-    """
+    """Conservatively coerce values to expected types for metafields."""
     try:
         if mtype in ("integer", "number", "float", "decimal"):
             return int(value) if mtype == "integer" else float(value)
@@ -237,18 +211,13 @@ def get_sync_keys(resource):
     return []
 
 def save_sync_keys(resource, keys):
-    """
-    Create/update the metafield that stores the list of keys to sync.
-    Avoids resource.metafields() mixin calls.
-    """
+    """Create/update the metafield that stores the list of keys to sync."""
     try:
-        # Find existing sync metafield (if any)
         existing = None
         for m in _metafields_for_resource(resource):
             if getattr(m, "namespace", None) == SYNC_NAMESPACE and getattr(m, "key", None) == SYNC_KEY:
                 existing = m
                 break
-
         meta = existing or shopify.Metafield()
         meta.namespace = SYNC_NAMESPACE
         meta.key = SYNC_KEY
@@ -284,10 +253,8 @@ def copy_product_metafields(
 ):
     logs = []
     ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
-
     donor_metafields = list(find_product_metafields_all(donor_product.id))
     receiver_map = _product_metafield_map(receiver_product)
-
     synced_keyset = set(get_sync_keys(donor_product)) if only_synced else None
 
     total = copied = skipped_exists = skipped_ns = skipped_key = skipped_unsynced = errors = 0
@@ -297,25 +264,17 @@ def copy_product_metafields(
         key = getattr(dm, "key", None)
         if not ns or not key:
             continue
-
         if ns_filter and ns not in ns_filter:
-            skipped_ns += 1
-            continue
-
+            skipped_ns += 1; continue
         if synced_keyset is not None and key not in synced_keyset:
-            skipped_unsynced += 1
-            continue
-
+            skipped_unsynced += 1; continue
         if keys_to_copy is not None and key not in set(keys_to_copy):
-            skipped_key += 1
-            continue
+            skipped_key += 1; continue
 
         total += 1
         receiver_existing = receiver_map.get((ns, key))
-
         if receiver_existing and not overwrite:
-            skipped_exists += 1
-            continue
+            skipped_exists += 1; continue
 
         mtype = getattr(dm, "type", None) or "string"
         value = _normalize_value_for_type(getattr(dm, "value", None), mtype)
@@ -324,8 +283,7 @@ def copy_product_metafields(
             if dry_run:
                 action = "UPDATE" if receiver_existing else "CREATE"
                 logs.append(f"[DRY RUN] {action} {ns}.{key} = {value!r} (type={mtype})")
-                copied += 1
-                continue
+                copied += 1; continue
 
             if receiver_existing:
                 receiver_existing.value = value
@@ -337,23 +295,16 @@ def copy_product_metafields(
                 ok = receiver_existing.save()
             else:
                 mf = shopify.Metafield()
-                mf.namespace = ns
-                mf.key = key
-                mf.type = mtype
-                mf.value = value
-                mf.owner_id = receiver_product.id
-                mf.owner_resource = "product"
+                mf.namespace = ns; mf.key = key; mf.type = mtype; mf.value = value
+                mf.owner_id = receiver_product.id; mf.owner_resource = "product"
                 ok = mf.save()
 
-            if ok:
-                copied += 1
+            if ok: copied += 1
             else:
-                errors += 1
-                logs.append(f"❌ Failed to save '{ns}.{key}' on receiver {receiver_product.id}")
+                errors += 1; logs.append(f"❌ Failed to save '{ns}.{key}' on receiver {receiver_product.id}")
             time.sleep(0.5)
         except Exception as e:
-            errors += 1
-            logs.append(f"❌ Error copying '{ns}.{key}': {e}")
+            errors += 1; logs.append(f"❌ Error copying '{ns}.{key}': {e}")
 
     summary = (
         f"Copied {copied}/{total} metafields "
@@ -364,31 +315,26 @@ def copy_product_metafields(
                    f"{'(DRY RUN)' if dry_run else ''}")
     logs.append(summary)
     return {"summary": summary, "logs": logs}
-    
-    
+
 def _variant_match_key(variant, by: str):
-    """Return a comparable key for matching across products."""
+    """Return a comparable key for matching across products. Default is SKU."""
     by = (by or "").lower()
     try:
-        if by in ("barcode", "sku", "title", "option1", "option2", "option3"):
+        if by in ("sku", "title", "option1", "option2", "option3"):
             v = getattr(variant, by, None)
             if v is None:
                 return None
-            # Keep as string; preserve leading zeros for EAN/UPC
             return str(v).strip()
         if by == "position":
             return int(getattr(variant, "position", 0) or 0)
-        # Fallback: barcode first, then sku
-        v = getattr(variant, "barcode", None) or getattr(variant, "sku", None)
+        # Fallback: SKU
+        v = getattr(variant, "sku", None)
         return str(v).strip() if v else None
     except Exception:
         return None
 
 def _variant_map_by(product, by: str):
-    """
-    Build a lookup {match_key -> variant} for a product.
-    If multiple receiver variants share the same key, the last one wins.
-    """
+    """Build a lookup {match_key -> variant} for a product."""
     m = {}
     for v in getattr(product, "variants", []) or []:
         k = _variant_match_key(v, by)
@@ -399,12 +345,12 @@ def _variant_map_by(product, by: str):
 def copy_variant_metafields(
     donor_product,
     receiver_product,
-    match_by="barcode",                 # how to match variants across products
-    keys_to_copy=None,              # list[str] (without namespace) or None
-    namespace_filter=None,          # str | list[str] | None
-    overwrite=False,                # if False, skip existing (ns,key) on receiver variant
-    only_synced=False,              # if True, use donor variant's SYNC list to restrict keys
-    dry_run=False,                  # if True, log actions only
+    match_by="sku",               # default: match by SKU within same store
+    keys_to_copy=None,
+    namespace_filter=None,
+    overwrite=False,
+    only_synced=False,
+    dry_run=False,
 ):
     logs = []
     ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
@@ -423,9 +369,7 @@ def copy_variant_metafields(
         rvar = receiver_lookup[dkey]
         total_pairs += 1
 
-        # donor variant metafields (paginated)
         donor_mfs = list(find_variant_metafields_all(getattr(dvar, "id", 0)))
-        # receiver current map {(ns,key)->mf}
         recv_map = {}
         for mf in find_variant_metafields_all(getattr(rvar, "id", 0)):
             ns = getattr(mf, "namespace", None)
@@ -442,21 +386,15 @@ def copy_variant_metafields(
                 continue
 
             if ns_filter and ns not in ns_filter:
-                total_skipped_ns += 1
-                continue
-
+                total_skipped_ns += 1; continue
             if synced_keyset is not None and key not in synced_keyset:
-                total_skipped_unsynced += 1
-                continue
-
+                total_skipped_unsynced += 1; continue
             if keys_to_copy is not None and key not in set(keys_to_copy):
-                total_skipped_key += 1
-                continue
+                total_skipped_key += 1; continue
 
             receiver_existing = recv_map.get((ns, key))
             if receiver_existing and not overwrite:
-                total_skipped_exists += 1
-                continue
+                total_skipped_exists += 1; continue
 
             mtype = getattr(dm, "type", None) or "string"
             value = _normalize_value_for_type(getattr(dm, "value", None), mtype)
@@ -464,11 +402,8 @@ def copy_variant_metafields(
             try:
                 if dry_run:
                     action = "UPDATE" if receiver_existing else "CREATE"
-                    logs.append(
-                        f"[DRY RUN] {action} variant {getattr(rvar,'id',None)} {ns}.{key} = {value!r} (type={mtype})"
-                    )
-                    total_copied += 1
-                    continue
+                    logs.append(f"[DRY RUN] {action} variant {getattr(rvar,'id',None)} {ns}.{key} = {value!r} (type={mtype})")
+                    total_copied += 1; continue
 
                 if receiver_existing:
                     receiver_existing.value = value
@@ -480,23 +415,16 @@ def copy_variant_metafields(
                     ok = receiver_existing.save()
                 else:
                     mf = shopify.Metafield()
-                    mf.namespace = ns
-                    mf.key = key
-                    mf.type = mtype
-                    mf.value = value
-                    mf.owner_id = getattr(rvar, "id", None)
-                    mf.owner_resource = "variant"
+                    mf.namespace = ns; mf.key = key; mf.type = mtype; mf.value = value
+                    mf.owner_id = getattr(rvar, "id", None); mf.owner_resource = "variant"
                     ok = mf.save()
 
-                if ok:
-                    total_copied += 1
+                if ok: total_copied += 1
                 else:
-                    total_errors += 1
-                    logs.append(f"❌ Failed to save variant {getattr(rvar,'id',None)} '{ns}.{key}'")
-                time.sleep(0.3)  # polite rate limiting
+                    total_errors += 1; logs.append(f"❌ Failed to save variant {getattr(rvar,'id',None)} '{ns}.{key}'")
+                time.sleep(0.3)
             except Exception as e:
-                total_errors += 1
-                logs.append(f"❌ Error on variant {getattr(rvar,'id',None)} '{ns}.{key}': {e}")
+                total_errors += 1; logs.append(f"❌ Error on variant {getattr(rvar,'id',None)} '{ns}.{key}': {e}")
 
     summary = (
         f"Variant metafields: matched variants={total_pairs}, "
@@ -508,12 +436,9 @@ def copy_variant_metafields(
     logs.insert(0, f"🧬 Variant copy donor {getattr(donor_product,'id',None)} → receiver {getattr(receiver_product,'id',None)} (match_by={match_by})")
     logs.append(summary)
     return {"summary": summary, "logs": logs}
-    
-    
 
 # ---------- EXPORT HELPERS ----------
 def _is_effectively_empty(v):
-    # None or blank strings count as empty; numbers 0, False, "0" are NOT empty.
     if v is None:
         return True
     if isinstance(v, str) and v.strip() == "":
@@ -521,28 +446,19 @@ def _is_effectively_empty(v):
     return False
 
 def _drop_all_empty_columns(df, keep_always=None):
-    """
-    Remove columns where every row is empty (None or blank string).
-    keep_always: set of column names to always keep (e.g., ids/titles)
-    """
     if df is None or df.empty:
         return df
     keep_always = keep_always or set()
     cols_to_keep = []
     for col in df.columns:
         if col in keep_always:
-            cols_to_keep.append(col)
-            continue
+            cols_to_keep.append(col); continue
         series = df[col]
         if not all(_is_effectively_empty(v) for v in series):
             cols_to_keep.append(col)
     return df[cols_to_keep]
 
 def metafields_dict(resource, only_synced=False):
-    """
-    Returns a flat dict of metafields for a product or variant:
-    keys look like 'namespace.key' -> value (None/str preserved)
-    """
     allowed_keys = set(get_sync_keys(resource)) if only_synced else None
     out = {}
     try:
@@ -560,17 +476,9 @@ def metafields_dict(resource, only_synced=False):
     return out
 
 def build_category_export(products_in_type, only_synced=False, include_variants=True):
-    """
-    Build two DataFrames:
-      - products_df: one row per product (standard fields + metafields)
-      - variants_df: one row per variant (standard fields + metafields)
-    Drops any columns that are completely empty across the sheet,
-    while always keeping key identifiers.
-    """
     product_rows, variant_rows = [], []
 
     for idx, p in enumerate(products_in_type, 1):
-        # --- Product row (standard fields)
         base = {
             "product_id": p.id,
             "title": getattr(p, "title", None) or None,
@@ -588,7 +496,6 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
         base.update(metafields_dict(p, only_synced=only_synced))
         product_rows.append(base)
 
-        # --- Variant rows (optional)
         if include_variants:
             for v in getattr(p, "variants", []):
                 vbase = {
@@ -607,7 +514,7 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
                 }
                 vbase.update(metafields_dict(v, only_synced=only_synced))
                 variant_rows.append(vbase)
-                time.sleep(0.4)  # be gentle with rate limits
+                time.sleep(0.4)
 
         if idx % 10 == 0:
             time.sleep(0.2)
@@ -615,49 +522,36 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
     products_df = pd.DataFrame(product_rows) if product_rows else pd.DataFrame()
     variants_df = pd.DataFrame(variant_rows) if variant_rows else pd.DataFrame()
 
-    # Drop columns that are entirely empty, but always keep identifiers
     products_df = _drop_all_empty_columns(
-        products_df,
-        keep_always={"product_id", "title", "handle", "product_type"}
+        products_df, keep_always={"product_id", "title", "handle", "product_type"}
     )
     if not variants_df.empty:
         variants_df = _drop_all_empty_columns(
-            variants_df,
-            keep_always={"product_id", "product_title", "variant_id", "variant_title", "sku", "barcode"}
+            variants_df, keep_always={"product_id", "product_title", "variant_id", "variant_title", "sku", "barcode"}
         )
-
     return products_df, variants_df
 
 def make_xlsx_download(products_df, variants_df, store_key, category_label):
-    """
-    Write the two DataFrames into an in-memory XLSX with 2 sheets.
-    Uses XlsxWriter to avoid openpyxl dependency issues.
-    """
-    # Ensure DataFrame objects exist
     if products_df is None:
         products_df = pd.DataFrame()
     if variants_df is None:
         variants_df = pd.DataFrame()
-
     buf = BytesIO()
     try:
-        # Use XlsxWriter for writing
         with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
             products_df.to_excel(writer, index=False, sheet_name="Products")
             variants_df.to_excel(writer, index=False, sheet_name="Variants")
     except Exception as e:
         st.error(
             "Failed to build the Excel file. Make sure 'XlsxWriter' is installed "
-            "(add it to requirements.txt). Error: {}".format(e)
+            f"(add it to requirements.txt). Error: {e}"
         )
         raise
-
     buf.seek(0)
     safe_cat = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(category_label))[:60]
     fname = f"export_{store_key}_{dt.date.today().isoformat()}.xlsx" if not safe_cat else \
             f"export_{store_key}_{safe_cat}_{dt.date.today().isoformat()}.xlsx"
     return fname, buf
-# ---------- END EXPORT HELPERS ----------
 
 # =========================
 # UI
@@ -673,7 +567,6 @@ store_label = store_cfg["label"]
 if f"show_only_sync_{store_key}" not in st.session_state:
     st.session_state[f"show_only_sync_{store_key}"] = False
 
-
 # Cache per store key in session as well (fast switching)
 state_key = f"products_{store_key}"
 if state_key not in st.session_state:
@@ -685,7 +578,7 @@ if not products:
     st.warning(f"No products found in {store_label}.")
     st.stop()
 
-# --- Category & Product selectors (side by side) + Refresh button on the right ---
+# --- Category & Product selectors + Refresh button aligned ---
 product_types = sorted({p.product_type for p in products if getattr(p, "product_type", None)})
 
 col_cat, col_prod, col_refresh = st.columns([1, 2, 0.9])
@@ -700,7 +593,6 @@ with col_cat:
         key=f"category_select_{store_key}",
     )
 
-# Filter products by chosen category
 filtered_products = [p for p in products if p.product_type == selected_type]
 
 with col_prod:
@@ -715,7 +607,6 @@ with col_prod:
     )
 
 with col_refresh:
-    # Spacer to visually bottom-align the button with the selects (tweak if needed)
     st.markdown("<div style='height: 1.8rem'></div>", unsafe_allow_html=True)
     if st.button("🔄 Refresh product list", key=f"refresh_btn_{store_key}", use_container_width=True):
         st.session_state.pop(f"products_{store_key}", None)
@@ -724,7 +615,6 @@ with col_refresh:
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-    # Donor product
     donor_product = st.selectbox(
         "Donor product (copy FROM)",
         products,
@@ -732,7 +622,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         key=f"donor_select_{store_key}",
     )
 
-    # Up to 3 receivers
+    # Up to 3 receivers in SAME store
     colrcv = st.columns(3)
     receiver_products = []
     for i, col in enumerate(colrcv, start=1):
@@ -746,7 +636,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             if rcv is not None:
                 receiver_products.append(rcv)
 
-    # Fetch donor keys for selection (namespaced & plain) — cached + retry-safe to avoid 429s
+    # Donor keys for selection (retry-safe)
     donor_metafields_list = get_product_metafields_with_retries(getattr(donor_product, "id", 0)) if donor_product else []
     donor_keys_plain = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
     donor_namespaced = sorted({
@@ -754,7 +644,6 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         for m in donor_metafields_list if getattr(m, "key", "")
     })
 
-    # Advanced options
     with st.expander("Advanced copy options", expanded=False):
         ns_filter_text = st.text_input(
             "Namespace filter (comma-separated, leave blank for all)",
@@ -800,48 +689,75 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         help="After copying product metafields, also copy each donor variant's metafields to a matching receiver variant.",
         key=f"copy_variants_{store_key}",
     )
-    st.caption("Variant matching is fixed to **EAN/Barcode** (variant.barcode).")
+    st.caption("Variant matching is fixed to **SKU**.")
 
-    # Always-visible list of donor namespaced keys
+    # Namespaced keys list (always visible)
     if donor_namespaced:
         st.caption("Donor has the following namespaced keys available:")
         st.code("\n".join(donor_namespaced), language="text")
     else:
         st.caption("Donor has no metafields (or none fetched yet).")
 
-    # Action button
+    # --- SKU sanity check helper ---
+    def _sku_stats(product):
+        seen = {}
+        blanks = 0
+        for v in getattr(product, "variants", []) or []:
+            sku = (getattr(v, "sku", None) or "").strip()
+            if not sku:
+                blanks += 1
+            else:
+                seen[sku] = seen.get(sku, 0) + 1
+        dups = {k: c for k, c in seen.items() if c > 1}
+        return blanks, dups
+
     copy_clicked = st.button("➡️ Copy metafields from donor → receivers", type="primary", use_container_width=True, key=f"copy_btn_{store_key}")
 
     if copy_clicked:
         if not donor_product or not receiver_products:
             st.warning("Pick a donor and at least one receiver product.")
         else:
-            # Ensure we have an active session
             connect_to_store(store_cfg["url"], store_cfg["token"])
             with st.spinner("Copying metafields..."):
+
+                # --- SKU sanity check (donor) ---
+                b_blanks, b_dups = _sku_stats(donor_product)
+                if b_blanks:
+                    st.warning(f"Donor has {b_blanks} variant(s) with blank SKU — those won't copy.")
+                if b_dups:
+                    st.warning(f"Donor has duplicate SKUs: {', '.join(list(b_dups.keys())[:10])} …")
+
                 for rcv in receiver_products:
                     if rcv.id == donor_product.id:
                         st.warning(f"Skipped receiver {rcv.id} — cannot be the same as donor.")
                         continue
 
+                    # SKU sanity for receiver
+                    r_blanks, r_dups = _sku_stats(rcv)
+                    if r_blanks:
+                        st.info(f"Receiver {rcv.id} has {r_blanks} blank SKU(s) — unmatched variants will be skipped.")
+                    if r_dups:
+                        st.info(f"Receiver {rcv.id} has duplicate SKUs — last one will win for each duplicate key.")
+
                     # 1) Product metafields
                     result = copy_product_metafields(
                         donor_product=donor_product,
                         receiver_product=rcv,
-                        keys_to_copy=keys_to_copy if keys_to_copy else None,
+                        keys_to_copy=keys_to_copy or None,
                         namespace_filter=namespace_filter,
                         overwrite=overwrite_existing,
                         only_synced=only_synced_keys,
                         dry_run=dry_run,
                     )
 
-                    # 2) Variant metafields (matched by barcode/EAN)
+                    # 2) Variant metafields (by SKU)
+                    v_result = None
                     if copy_variants:
                         v_result = copy_variant_metafields(
                             donor_product=donor_product,
                             receiver_product=rcv,
-                            match_by="barcode",  # fixed to EAN/Barcode
-                            keys_to_copy=keys_to_copy if keys_to_copy else None,
+                            match_by="sku",
+                            keys_to_copy=keys_to_copy or None,
                             namespace_filter=namespace_filter,
                             overwrite=overwrite_existing,
                             only_synced=only_synced_keys,
@@ -852,22 +768,19 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                         st.info(f"[DRY RUN] Receiver {rcv.id}: no changes saved.")
 
                     st.success(f"Receiver {rcv.id}: {result['summary']}")
-                    if copy_variants:
+                    if v_result:
                         st.success(f"Receiver {rcv.id}: {v_result['summary']}")
 
                     with st.expander(f"Details for receiver {rcv.id}", expanded=False):
                         for line in result["logs"]:
                             st.write(line)
-                        if copy_variants:
+                        if v_result:
                             st.markdown("---")
                             for line in v_result["logs"]:
                                 st.write(line)
-                        
-# ---------- END Product Metafields UI ----------
 
 # ---------- EXPORT UI ----------
 with st.expander("📤 Export this Category", expanded=False):
-    # Use the shared toggle state
     current_only_synced = st.session_state.get(f"show_only_sync_{store_key}", False)
 
     colx2, colx3 = st.columns([1, 2])
@@ -892,7 +805,7 @@ with st.expander("📤 Export this Category", expanded=False):
         with st.spinner("Building export…"):
             prod_df, var_df = build_category_export(
                 filtered_products,
-                only_synced=current_only_synced,          # ← use the shared toggle
+                only_synced=current_only_synced,
                 include_variants=export_include_variants,
             )
             if prod_df.empty and (var_df.empty or not export_include_variants):
@@ -912,8 +825,6 @@ with st.expander("📤 Export this Category", expanded=False):
                 if export_include_variants and not var_df.empty:
                     with st.expander("Preview: Variants (first 50 rows)"):
                         st.dataframe(var_df.head(50), use_container_width=True)
-# ---------- END EXPORT UI ----------
-
 
 # ---------- Info & Actions ----------
 product_save_logs = []
@@ -928,7 +839,6 @@ with st.expander("💡 How it works", expanded=False):
 - The button **Sync This Product to Shop B & C** only pushes fields that are marked for sync,
   and it uses the **latest saved values** from this shop.
 """)
-
 
 st.markdown("### 💾 Save & Synchronize Metafields")
 col1, col2, col3 = st.columns([1, 1, 2])
@@ -973,7 +883,6 @@ with st.expander("📦 Standard Product Fields", expanded=False):
         key="standard_editor"
     )
 
-# Keep the attr map outside so save logic can access it
 st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_rows}
 
 # ---------- Product & Variant Metafields (shared 'show only synced' toggle) ----------
@@ -986,15 +895,15 @@ show_only_sync = st.checkbox(
 
 # ---------- Product Metafields ----------
 product_fields = []
-sync_keys = get_sync_keys(selected_product)
+sync_keys_for_product = get_sync_keys(selected_product)
 existing_fields = {m.key: m for m in find_product_metafields_all(selected_product.id)}
 for key, m in existing_fields.items():
-    if show_only_sync and key not in sync_keys:
+    if show_only_sync and key not in sync_keys_for_product:
         continue
     product_fields.append({
         "key": key,
         "value": str(m.value) if m.value is not None else "",
-        "sync": key in sync_keys,
+        "sync": key in sync_keys_for_product,
         "product_id": selected_product.id,
         "product_title": selected_product.title,
         "type": getattr(m, "type", "string"),
@@ -1043,23 +952,19 @@ if variant_rows:
 else:
     edited_df_v = None
 
-
 # ---------- Save Logic ----------
 if save_clicked:
-    # --- Save standard fields (Title, Handle, Vendor, Product Type, Tags, Status) ---
+    # --- Save standard fields ---
     try:
         std_map = st.session_state.get("_std_attr_map", {})
         std_updates = {}
-
         if edited_std_df is not None:
-            df_std_current = edited_std_df
-            for _, row in df_std_current.iterrows():
+            for _, row in edited_std_df.iterrows():
                 field_label = row["field"]
                 new_val = str(row["value"]) if row["value"] is not None else ""
                 attr = std_map.get(field_label)
                 if not attr:
                     continue
-
                 current = getattr(selected_product, attr, "")
                 if attr == "tags":
                     current_str = ", ".join(current) if isinstance(current, list) else (current or "")
@@ -1069,30 +974,19 @@ if save_clicked:
                     if str(current or "") != new_val:
                         std_updates[attr] = new_val
 
-        # Optional: validate status
         if "status" in std_updates:
             val = std_updates["status"].strip().lower()
             if val not in {"active", "draft", "archived"}:
-                product_save_logs.append(
-                    f"⚠️ Skipped invalid status '{std_updates['status']}'. Use active/draft/archived."
-                )
+                product_save_logs.append(f"⚠️ Skipped invalid status '{std_updates['status']}'. Use active/draft/archived.")
                 std_updates.pop("status", None)
             else:
                 std_updates["status"] = val
 
-        # --- Save standard fields ---
         if std_updates:
-            # Normalize tags BEFORE saving
             if "tags" in std_updates:
-                std_updates["tags"] = ", ".join(
-                    [t.strip() for t in str(std_updates["tags"]).split(",") if t.strip()]
-                )
-
-            # Apply updates to the product object once
+                std_updates["tags"] = ", ".join([t.strip() for t in str(std_updates["tags"]).split(",") if t.strip()])
             for attr, v in std_updates.items():
                 setattr(selected_product, attr, v)
-
-            # Save, with clearer 422 handling and a key=value success log
             try:
                 selected_product.save()
                 saved_pairs = [f"{k}='{v}'" for k, v in std_updates.items()]
@@ -1101,16 +995,9 @@ if save_clicked:
             except Exception as e:
                 msg = str(e)
                 if "422" in msg:
-                    product_save_logs.append(
-                        f"❌ Error saving standard fields (422 Unprocessable Entity): {e} — "
-                        "check required fields and valid values (e.g., status active/draft/archived)."
-                    )
+                    product_save_logs.append(f"❌ Error saving standard fields (422): {e}")
                 else:
-                    product_save_logs.append(
-                        f"❌ Error saving standard fields: {e} — "
-                        "check that required fields are valid for this product type."
-                    )
-
+                    product_save_logs.append(f"❌ Error saving standard fields: {e}")
     except Exception as e:
         product_save_logs.append(f"❌ Error preparing standard field saves: {e}")
 
@@ -1119,17 +1006,12 @@ if save_clicked:
         updated_product_sync_keys = []
         row_lookup = {row["key"]: row["metafield_obj"] for row in product_fields}
         type_lookup = {row["key"]: row["type"] for row in product_fields}
-
         for _, row in edited_df.iterrows():
-            key = row["key"]
-            new_value = row["value"]
-            sync_flag = bool(row["sync"])
+            key = row["key"]; new_value = row["value"]; sync_flag = bool(row["sync"])
             original = row_lookup.get(key)
             original_type = type_lookup.get(key, "string")
-
             if sync_flag:
                 updated_product_sync_keys.append(key)
-
             if original and str(original.value) != str(new_value):
                 try:
                     if original_type == "integer":
@@ -1142,11 +1024,9 @@ if save_clicked:
                         original.value = float(new_value)
                     else:
                         original.value = new_value
-                    original.save()
-                    time.sleep(0.6)
+                    original.save(); time.sleep(0.6)
                 except Exception as e:
                     product_save_logs.append(f"❌ Error saving product metafield '{key}': {e}")
-
         if save_sync_keys(selected_product, updated_product_sync_keys):
             product_save_logs.append(f"✅ Saved product sync fields: {', '.join(updated_product_sync_keys)}")
 
@@ -1154,22 +1034,16 @@ if save_clicked:
     if edited_df_v is not None:
         row_lookup = {(row["variant_id"], row["key"]): row["metafield_obj"] for row in variant_rows}
         type_lookup = {(row["variant_id"], row["key"]): row["type"] for row in variant_rows}
-
         grouped = edited_df_v.groupby("variant_id")
         for variant_id, rows in grouped:
             variant = variant_map[variant_id]
             keys_to_sync = []
-
             for _, row in rows.iterrows():
-                key = row["key"]
-                new_value = row["value"]
-                sync_flag = bool(row["sync"])
+                key = row["key"]; new_value = row["value"]; sync_flag = bool(row["sync"])
                 original = row_lookup.get((variant_id, key))
                 original_type = type_lookup.get((variant_id, key), "string")
-
                 if sync_flag:
                     keys_to_sync.append(key)
-
                 if original and str(original.value) != str(new_value):
                     try:
                         if original_type == "integer":
@@ -1182,11 +1056,9 @@ if save_clicked:
                             original.value = float(new_value)
                         else:
                             original.value = new_value
-                        original.save()
-                        time.sleep(0.6)
+                        original.save(); time.sleep(0.6)
                     except Exception as e:
                         variant_save_logs.append(f"❌ Error saving variant {variant_id} metafield '{key}': {e}")
-
             if save_sync_keys(variant, keys_to_sync):
                 variant_save_logs.append(f"✅ Saved variant {variant_id} sync fields: {', '.join(keys_to_sync)}")
 
@@ -1196,12 +1068,8 @@ if apply_sync_clicked:
     current_variant_keys = set()
     for v in selected_product.variants:
         current_variant_keys.update(get_sync_keys(v))
-
     apply_sync_keys_to_category(
-        products,
-        selected_product.product_type,
-        current_product_keys,
-        list(current_variant_keys)
+        products, selected_product.product_type, current_product_keys, list(current_variant_keys)
     )
     product_save_logs.append("✅ Sync settings applied to all products and variants in this category.")
 
