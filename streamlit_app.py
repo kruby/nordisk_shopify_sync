@@ -741,13 +741,15 @@ _std_rows = [{"field": label, "attr": attr, "value": _std_get_val(attr)}
              for attr, label in standard_fields_schema]
 _std_df = pd.DataFrame(_std_rows, columns=["field", "attr", "value"])
 
-st.markdown("### 📦 Standard Product Fields")
-edited_std_df = st.data_editor(
-    _std_df.drop(columns=["attr"]),
-    num_rows="fixed",
-    use_container_width=True,
-    key="standard_editor"
-)
+with st.expander("📦 Standard Product Fields", expanded=False):
+    edited_std_df = st.data_editor(
+        _std_df.drop(columns=["attr"]),
+        num_rows="fixed",
+        use_container_width=True,
+        key="standard_editor"
+    )
+
+# Keep the attr map outside so save logic can access it
 st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_rows}
 
 # ---------- Product Metafields ----------
