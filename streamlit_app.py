@@ -689,7 +689,9 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         help="After copying product metafields, also copy each donor variant's metafields to a matching receiver variant.",
         key=f"copy_variants_{store_key}",
     )
-    st.caption("Variant matching is fixed to **SKU**.")
+    match_by = "title"  # we match variants by their Title (typically encodes color/size)
+    st.caption("Variant matching is fixed to **Title** (e.g., size/colour).")
+    
 
     # Namespaced keys list (always visible)
     if donor_namespaced:
@@ -698,16 +700,18 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
     else:
         st.caption("Donor has no metafields (or none fetched yet).")
 
-    # --- SKU sanity check helper ---
-    def _sku_stats(product):
+    # --- Variant key sanity check helper (e.g., 'title') ---
+    def _variant_key_stats(product, by: str):
+        by = (by or "").lower()
         seen = {}
         blanks = 0
         for v in getattr(product, "variants", []) or []:
-            sku = (getattr(v, "sku", None) or "").strip()
-            if not sku:
+            val = getattr(v, by, None)
+            key = (str(val).strip() if val is not None else "")
+            if not key:
                 blanks += 1
             else:
-                seen[sku] = seen.get(sku, 0) + 1
+                seen[key] = seen.get(key, 0) + 1
         dups = {k: c for k, c in seen.items() if c > 1}
         return blanks, dups
 
@@ -720,12 +724,12 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             connect_to_store(store_cfg["url"], store_cfg["token"])
             with st.spinner("Copying metafields..."):
 
-                # --- SKU sanity check (donor) ---
-                b_blanks, b_dups = _sku_stats(donor_product)
+                # --- Title sanity check (donor) ---
+                b_blanks, b_dups = _variant_key_stats(donor_product, match_by)
                 if b_blanks:
-                    st.warning(f"Donor has {b_blanks} variant(s) with blank SKU — those won't copy.")
+                    st.warning(f"Donor has {b_blanks} variant(s) with blank {match_by!r} — those won't copy.")
                 if b_dups:
-                    st.warning(f"Donor has duplicate SKUs: {', '.join(list(b_dups.keys())[:10])} …")
+                    st.warning(f"Donor has duplicate {match_by!r} values: {', '.join(list(b_dups.keys())[:10])} …")
 
                 for rcv in receiver_products:
                     if rcv.id == donor_product.id:
@@ -733,11 +737,12 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                         continue
 
                     # SKU sanity for receiver
-                    r_blanks, r_dups = _sku_stats(rcv)
+                    # Title sanity for receiver
+                    r_blanks, r_dups = _variant_key_stats(rcv, match_by)
                     if r_blanks:
-                        st.info(f"Receiver {rcv.id} has {r_blanks} blank SKU(s) — unmatched variants will be skipped.")
+                        st.info(f"Receiver {rcv.id} has {r_blanks} blank {match_by!r} value(s) — unmatched variants will be skipped.")
                     if r_dups:
-                        st.info(f"Receiver {rcv.id} has duplicate SKUs — last one will win for each duplicate key.")
+                        st.info(f"Receiver {rcv.id} has duplicate {match_by!r} values — last one will win for each duplicate key.")
 
                     # 1) Product metafields
                     result = copy_product_metafields(
@@ -756,7 +761,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                         v_result = copy_variant_metafields(
                             donor_product=donor_product,
                             receiver_product=rcv,
-                            match_by="sku",
+                            match_by=match_by, # Title
                             keys_to_copy=keys_to_copy or None,
                             namespace_filter=namespace_filter,
                             overwrite=overwrite_existing,
