@@ -119,8 +119,6 @@ def get_store_config():
         )
 
     cfg = store_options[store_label]
-
-    with col_refresh:
     
     if not cfg["url"] or not cfg["token"]:
         st.error(f"Missing secrets for {cfg['label']}. Please set {cfg['label']} URL and token in Streamlit secrets.")
