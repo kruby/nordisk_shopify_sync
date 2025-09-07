@@ -108,18 +108,18 @@ def get_store_config():
                 default_index = i
                 break
 
-    st.markdown("#### Store")
-    store_label = st.selectbox(
-        "Choose which shop to view/edit",
-        keys,
-        index=default_index,
-        help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
-    )
+    col_store_sel, col_store_info = st.columns([2, 3])
+    with col_store_sel:
+        store_label = st.selectbox(
+            "Choose which shop to view/edit",
+            keys,
+            index=default_index,
+            help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
+        )
     cfg = store_options[store_label]
-    if not cfg["url"] or not cfg["token"]:
-        st.error(f"Missing secrets for {cfg['label']}. Please set {cfg['label']} URL and token in Streamlit secrets.")
-        st.stop()
-    return cfg  # dict with key/url/token/label
+    with col_store_info:
+        st.info(f"Viewing & editing: **{cfg['label']}**", icon="🏬")
+
 
 def connect_to_store(shop_url=None, token=None):
     url = shop_url if shop_url else f"https://{SHOP_URL}"
@@ -517,7 +517,6 @@ connect_to_store(store_cfg["url"], store_cfg["token"])
 store_key = store_cfg["key"]
 store_label = store_cfg["label"]
 
-st.info(f"Viewing & editing: **{store_label}**", icon="🏬")
 
 # Cache per store key in session as well (fast switching)
 state_key = f"products_{store_key}"
