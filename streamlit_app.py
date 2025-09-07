@@ -521,6 +521,11 @@ connect_to_store(store_cfg["url"], store_cfg["token"])
 store_key = store_cfg["key"]
 store_label = store_cfg["label"]
 
+# One shared toggle for filtering across product + variant + export
+if f"show_only_sync_{store_key}" not in st.session_state:
+    st.session_state[f"show_only_sync_{store_key}"] = False
+
+
 # Cache per store key in session as well (fast switching)
 state_key = f"products_{store_key}"
 if state_key not in st.session_state:
@@ -570,14 +575,10 @@ with col_refresh:
 
 # ---------- EXPORT UI ----------
 with st.expander("📤 Export this Category", expanded=False):
-    colx1, colx2, colx3 = st.columns([1, 1, 2])
-    with colx1:
-        export_only_synced = st.checkbox(
-            "Only synced metafields",
-            value=show_only_sync,
-            help="Exports only metafields you’ve marked to sync.",
-            key=f"export_only_synced_{store_key}",
-        )
+    # Use the shared toggle state
+    current_only_synced = st.session_state.get(f"show_only_sync_{store_key}", False)
+
+    colx2, colx3 = st.columns([1, 2])
     with colx2:
         export_include_variants = st.checkbox(
             "Include variants",
@@ -590,11 +591,16 @@ with st.expander("📤 Export this Category", expanded=False):
             key=f"build_export_{store_key}",
         )
 
+    st.caption(
+        f"Export will respect **Show only synced metafields = {'ON' if current_only_synced else 'OFF'}** "
+        f"(toggle it under Product Metafields)."
+    )
+
     if build_and_show:
         with st.spinner("Building export…"):
             prod_df, var_df = build_category_export(
                 filtered_products,
-                only_synced=export_only_synced,
+                only_synced=current_only_synced,          # ← use the shared toggle
                 include_variants=export_include_variants,
             )
             if prod_df.empty and (var_df.empty or not export_include_variants):
@@ -786,6 +792,14 @@ with st.expander("📦 Standard Product Fields", expanded=False):
 # Keep the attr map outside so save logic can access it
 st.session_state["_std_attr_map"] = {row["field"]: row["attr"] for row in _std_rows}
 
+# ---------- Product & Variant Metafields (shared 'show only synced' toggle) ----------
+st.markdown(f"### 🔍 Product Metafields — {store_label}")
+show_only_sync = st.checkbox(
+    "🔁 Show only synced metafields",
+    value=st.session_state[f"show_only_sync_{store_key}"],
+    key=f"show_only_sync_{store_key}",
+)
+
 # ---------- Product Metafields ----------
 product_fields = []
 sync_keys = get_sync_keys(selected_product)
@@ -804,19 +818,8 @@ for key, m in existing_fields.items():
     })
 
 if product_fields:
-    st.markdown(f"### 🔍 Product Metafields — {store_label}")
-    show_only_sync = st.checkbox(
-        "🔁 Show only synced metafields",
-        value=False,
-        key=f"show_only_sync_{store_key}",
-    )
     df = pd.DataFrame(product_fields).drop(columns=["metafield_obj"])
-    edited_df = st.data_editor(
-        df,
-        num_rows="fixed",
-        use_container_width=True,
-        key=f"product_editor_{store_key}",
-    )
+    edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key=f"product_editor_{store_key}")
 else:
     edited_df = None
 
@@ -855,6 +858,7 @@ if variant_rows:
     edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key=f"variant_editor_{store_key}")
 else:
     edited_df_v = None
+
 
 # ---------- Save Logic ----------
 if save_clicked:
