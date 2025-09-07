@@ -108,10 +108,12 @@ def get_store_config():
                 default_index = i
                 break
 
-    col_store_sel, col_spacer, col_refresh = st.columns([2, 2, 1])
-
-    with col_store_sel:
-        store_label = st.selectbox(
+    store_label = st.selectbox(
+        "Choose which shop to view/edit",
+        keys,
+        index=default_index,
+        help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
+    )
             "Choose which shop to view/edit",
             keys,
             index=default_index,
@@ -155,6 +157,8 @@ def get_all_products():
 
 # ---- Explicit metafield finders (avoid mixin) + pagination ----
 def find_product_metafields_all(product_id, **kwargs):
+    if not product_id:
+        return []
     page = shopify.Metafield.find(resource="products", resource_id=product_id, limit=250, **kwargs)
     items = []
     while page:
@@ -166,6 +170,8 @@ def find_product_metafields_all(product_id, **kwargs):
     return items
 
 def find_variant_metafields_all(variant_id, **kwargs):
+    if not variant_id:
+        return []
     page = shopify.Metafield.find(resource="variants", resource_id=variant_id, limit=250, **kwargs)
     items = []
     while page:
@@ -362,6 +368,152 @@ def copy_product_metafields(
                    f"{'(DRY RUN)' if dry_run else ''}")
     logs.append(summary)
     return {"summary": summary, "logs": logs}
+    
+    
+def _variant_match_key(variant, by: str):
+    """Return a comparable key for matching across products."""
+    by = (by or "").lower()
+    try:
+        if by in ("barcode", "sku", "title", "option1", "option2", "option3"):
+            v = getattr(variant, by, None)
+            if v is None:
+                return None
+            # Keep as string; preserve leading zeros for EAN/UPC
+            return str(v).strip()
+        if by == "position":
+            return int(getattr(variant, "position", 0) or 0)
+        # Fallback: barcode first, then sku
+        v = getattr(variant, "barcode", None) or getattr(variant, "sku", None)
+        return str(v).strip() if v else None
+    except Exception:
+        return None
+
+def _variant_map_by(product, by: str):
+    """
+    Build a lookup {match_key -> variant} for a product.
+    If multiple receiver variants share the same key, the last one wins.
+    """
+    m = {}
+    for v in getattr(product, "variants", []) or []:
+        k = _variant_match_key(v, by)
+        if k is not None and k != "":
+            m[k] = v
+    return m
+
+def copy_variant_metafields(
+    donor_product,
+    receiver_product,
+    match_by="barcode",                 # how to match variants across products
+    keys_to_copy=None,              # list[str] (without namespace) or None
+    namespace_filter=None,          # str | list[str] | None
+    overwrite=False,                # if False, skip existing (ns,key) on receiver variant
+    only_synced=False,              # if True, use donor variant's SYNC list to restrict keys
+    dry_run=False,                  # if True, log actions only
+):
+    logs = []
+    ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
+    receiver_lookup = _variant_map_by(receiver_product, match_by)
+
+    total_pairs = 0
+    total_mf = total_copied = total_skipped_exists = total_skipped_ns = total_skipped_key = total_skipped_unsynced = total_nomatch = total_errors = 0
+
+    for dvar in getattr(donor_product, "variants", []) or []:
+        dkey = _variant_match_key(dvar, match_by)
+        if dkey not in receiver_lookup:
+            total_nomatch += 1
+            logs.append(f"↪️ No receiver match for donor variant {getattr(dvar,'id',None)} by '{match_by}' (key={dkey!r}).")
+            continue
+
+        rvar = receiver_lookup[dkey]
+        total_pairs += 1
+
+        # donor variant metafields (paginated)
+        donor_mfs = list(find_variant_metafields_all(getattr(dvar, "id", 0)))
+        # receiver current map {(ns,key)->mf}
+        recv_map = {}
+        for mf in find_variant_metafields_all(getattr(rvar, "id", 0)):
+            ns = getattr(mf, "namespace", None)
+            k = getattr(mf, "key", None)
+            if ns and k:
+                recv_map[(ns, k)] = mf
+
+        synced_keyset = set(get_sync_keys(dvar)) if only_synced else None
+
+        for dm in donor_mfs:
+            ns = getattr(dm, "namespace", None)
+            key = getattr(dm, "key", None)
+            if not ns or not key:
+                continue
+
+            if ns_filter and ns not in ns_filter:
+                total_skipped_ns += 1
+                continue
+
+            if synced_keyset is not None and key not in synced_keyset:
+                total_skipped_unsynced += 1
+                continue
+
+            if keys_to_copy is not None and key not in set(keys_to_copy):
+                total_skipped_key += 1
+                continue
+
+            receiver_existing = recv_map.get((ns, key))
+            if receiver_existing and not overwrite:
+                total_skipped_exists += 1
+                continue
+
+            mtype = getattr(dm, "type", None) or "string"
+            value = _normalize_value_for_type(getattr(dm, "value", None), mtype)
+
+            try:
+                if dry_run:
+                    action = "UPDATE" if receiver_existing else "CREATE"
+                    logs.append(
+                        f"[DRY RUN] {action} variant {getattr(rvar,'id',None)} {ns}.{key} = {value!r} (type={mtype})"
+                    )
+                    total_copied += 1
+                    continue
+
+                if receiver_existing:
+                    receiver_existing.value = value
+                    try:
+                        if getattr(receiver_existing, "type", None) in (None, "", "string"):
+                            receiver_existing.type = mtype
+                    except Exception:
+                        pass
+                    ok = receiver_existing.save()
+                else:
+                    mf = shopify.Metafield()
+                    mf.namespace = ns
+                    mf.key = key
+                    mf.type = mtype
+                    mf.value = value
+                    mf.owner_id = getattr(rvar, "id", None)
+                    mf.owner_resource = "variant"
+                    ok = mf.save()
+
+                if ok:
+                    total_copied += 1
+                else:
+                    total_errors += 1
+                    logs.append(f"❌ Failed to save variant {getattr(rvar,'id',None)} '{ns}.{key}'")
+                time.sleep(0.3)  # polite rate limiting
+            except Exception as e:
+                total_errors += 1
+                logs.append(f"❌ Error on variant {getattr(rvar,'id',None)} '{ns}.{key}': {e}")
+
+    summary = (
+        f"Variant metafields: matched variants={total_pairs}, "
+        f"copied {total_copied} items "
+        f"(skipped existing: {total_skipped_exists}, skipped ns: {total_skipped_ns}, "
+        f"skipped key filter: {total_skipped_key}, skipped not-synced: {total_skipped_unsynced}, "
+        f"no match: {total_nomatch}, errors: {total_errors})."
+    )
+    logs.insert(0, f"🧬 Variant copy donor {getattr(donor_product,'id',None)} → receiver {getattr(receiver_product,'id',None)} (match_by={match_by})")
+    logs.append(summary)
+    return {"summary": summary, "logs": logs}
+    
+    
 
 # ---------- EXPORT HELPERS ----------
 def _is_effectively_empty(v):
@@ -598,8 +750,8 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             if rcv is not None:
                 receiver_products.append(rcv)
 
-    # Fetch donor keys for selection (namespaced & plain)
-    donor_metafields_list = list(find_product_metafields_all(getattr(donor_product, "id", 0))) if donor_product else []
+    # Fetch donor keys for selection (namespaced & plain) — cached + retry-safe to avoid 429s
+    donor_metafields_list = get_product_metafields_with_retries(getattr(donor_product, "id", 0)) if donor_product else []
     donor_keys_plain = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
     donor_namespaced = sorted({
         f"{getattr(m, 'namespace', 'mf')}.{getattr(m, 'key', '')}"
@@ -645,6 +797,15 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"dry_run_{store_key}",
         )
 
+    st.markdown("---")
+    copy_variants = st.checkbox(
+        "Also copy VARIANT metafields",
+        value=False,
+        help="After copying product metafields, also copy each donor variant's metafields to a matching receiver variant.",
+        key=f"copy_variants_{store_key}",
+    )
+    st.caption("Variant matching is fixed to **EAN/Barcode** (variant.barcode).")
+
     # Always-visible list of donor namespaced keys
     if donor_namespaced:
         st.caption("Donor has the following namespaced keys available:")
@@ -653,18 +814,21 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         st.caption("Donor has no metafields (or none fetched yet).")
 
     # Action button
-    copy_clicked = st.button("➡️ Copy metafields from donor → receivers", type="primary", use_container_width=True)
+    copy_clicked = st.button("➡️ Copy metafields from donor → receivers", type="primary", use_container_width=True, key=f"copy_btn_{store_key}")
 
     if copy_clicked:
         if not donor_product or not receiver_products:
             st.warning("Pick a donor and at least one receiver product.")
         else:
+            # Ensure we have an active session
             connect_to_store(store_cfg["url"], store_cfg["token"])
             with st.spinner("Copying metafields..."):
                 for rcv in receiver_products:
                     if rcv.id == donor_product.id:
                         st.warning(f"Skipped receiver {rcv.id} — cannot be the same as donor.")
                         continue
+
+                    # 1) Product metafields
                     result = copy_product_metafields(
                         donor_product=donor_product,
                         receiver_product=rcv,
@@ -674,12 +838,35 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                         only_synced=only_synced_keys,
                         dry_run=dry_run,
                     )
+
+                    # 2) Variant metafields (matched by barcode/EAN)
+                    if copy_variants:
+                        v_result = copy_variant_metafields(
+                            donor_product=donor_product,
+                            receiver_product=rcv,
+                            match_by="barcode",  # fixed to EAN/Barcode
+                            keys_to_copy=keys_to_copy if keys_to_copy else None,
+                            namespace_filter=namespace_filter,
+                            overwrite=overwrite_existing,
+                            only_synced=only_synced_keys,
+                            dry_run=dry_run,
+                        )
+
                     if dry_run:
                         st.info(f"[DRY RUN] Receiver {rcv.id}: no changes saved.")
+
                     st.success(f"Receiver {rcv.id}: {result['summary']}")
+                    if copy_variants:
+                        st.success(f"Receiver {rcv.id}: {v_result['summary']}")
+
                     with st.expander(f"Details for receiver {rcv.id}", expanded=False):
                         for line in result["logs"]:
                             st.write(line)
+                        if copy_variants:
+                            st.markdown("---")
+                            for line in v_result["logs"]:
+                                st.write(line)
+                        
 # ---------- END Product Metafields UI ----------
 
 # ---------- EXPORT UI ----------
