@@ -568,8 +568,6 @@ with col_refresh:
         st.session_state.pop(f"products_{store_key}", None)
         st.rerun()
 
-show_only_sync = st.checkbox("🔁 Show only synced metafields", value=False)
-
 # ---------- EXPORT UI ----------
 with st.expander("📤 Export this Category", expanded=False):
     colx1, colx2, colx3 = st.columns([1, 1, 2])
@@ -807,8 +805,18 @@ for key, m in existing_fields.items():
 
 if product_fields:
     st.markdown(f"### 🔍 Product Metafields — {store_label}")
+    show_only_sync = st.checkbox(
+        "🔁 Show only synced metafields",
+        value=False,
+        key=f"show_only_sync_{store_key}",
+    )
     df = pd.DataFrame(product_fields).drop(columns=["metafield_obj"])
-    edited_df = st.data_editor(df, num_rows="fixed", use_container_width=True, key=f"product_editor_{store_key}")
+    edited_df = st.data_editor(
+        df,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"product_editor_{store_key}",
+    )
 else:
     edited_df = None
 
