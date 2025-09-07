@@ -545,22 +545,27 @@ if build_and_show:
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-    # Choose donor/receiver from *any* products (not just filtered category)
-    colcp1, colcp2 = st.columns(2)
-    with colcp1:
-        donor_product = st.selectbox(
-            "Donor product (copy FROM)",
-            products,
-            format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
-            key=f"donor_select_{store_key}",
-        )
-    with colcp2:
-        receiver_product = st.selectbox(
-            "Receiver product (copy TO)",
-            products,
-            format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
-            key=f"receiver_select_{store_key}",
-        )
+    # Donor product
+    donor_product = st.selectbox(
+        "Donor product (copy FROM)",
+        products,
+        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+        key=f"donor_select_{store_key}",
+    )
+
+    # Up to 3 receivers
+    colrcv = st.columns(3)
+    receiver_products = []
+    for i, col in enumerate(colrcv, start=1):
+        with col:
+            rcv = st.selectbox(
+                f"Receiver {i} (copy TO)",
+                [None] + products,  # allow "none"
+                format_func=lambda p: "— None —" if p is None else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+                key=f"receiver_select_{i}_{store_key}",
+            )
+            if rcv is not None:
+                receiver_products.append(rcv)
 
     # Fetch donor keys for selection (namespaced & plain)
     donor_metafields_list = list(find_product_metafields_all(getattr(donor_product, "id", 0))) if donor_product else []
@@ -617,34 +622,33 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         st.caption("Donor has no metafields (or none fetched yet).")
 
     # Action button
-    col_btn, _ = st.columns([1, 3])
-    with col_btn:
-        copy_clicked = st.button("➡️ Copy metafields from donor → receiver", type="primary", use_container_width=True)
+    copy_clicked = st.button("➡️ Copy metafields from donor → receivers", type="primary", use_container_width=True)
 
     if copy_clicked:
-        if not donor_product or not receiver_product:
-            st.warning("Pick both a donor and receiver product.")
-        elif donor_product.id == receiver_product.id:
-            st.warning("Donor and receiver must be different products.")
+        if not donor_product or not receiver_products:
+            st.warning("Pick a donor and at least one receiver product.")
         else:
-            # ensure session is live right before API calls
             connect_to_store(store_cfg["url"], store_cfg["token"])
             with st.spinner("Copying metafields..."):
-                result = copy_product_metafields(
-                    donor_product=donor_product,
-                    receiver_product=receiver_product,
-                    keys_to_copy=keys_to_copy if keys_to_copy else None,
-                    namespace_filter=namespace_filter,
-                    overwrite=overwrite_existing,
-                    only_synced=only_synced_keys,
-                    dry_run=dry_run,
-                )
-                if dry_run:
-                    st.info("Dry run complete — no changes saved.")
-                st.success(result["summary"])
-                with st.expander("Copy details", expanded=False):
-                    for line in result["logs"]:
-                        st.write(line)
+                for rcv in receiver_products:
+                    if rcv.id == donor_product.id:
+                        st.warning(f"Skipped receiver {rcv.id} — cannot be the same as donor.")
+                        continue
+                    result = copy_product_metafields(
+                        donor_product=donor_product,
+                        receiver_product=rcv,
+                        keys_to_copy=keys_to_copy if keys_to_copy else None,
+                        namespace_filter=namespace_filter,
+                        overwrite=overwrite_existing,
+                        only_synced=only_synced_keys,
+                        dry_run=dry_run,
+                    )
+                    if dry_run:
+                        st.info(f"[DRY RUN] Receiver {rcv.id}: no changes saved.")
+                    st.success(f"Receiver {rcv.id}: {result['summary']}")
+                    with st.expander(f"Details for receiver {rcv.id}", expanded=False):
+                        for line in result["logs"]:
+                            st.write(line)
 
 
 # ---------- Info & Actions ----------
