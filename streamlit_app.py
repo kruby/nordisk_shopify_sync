@@ -108,23 +108,23 @@ def get_store_config():
                 default_index = i
                 break
 
-col_store_sel, col_spacer, col_refresh = st.columns([2, 2, 1])
+    col_store_sel, col_spacer, col_refresh = st.columns([2, 2, 1])
 
-with col_store_sel:
-    store_label = st.selectbox(
-        "Choose which shop to view/edit",
-        keys,
-        index=default_index,
-        help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
-    )
+    with col_store_sel:
+        store_label = st.selectbox(
+            "Choose which shop to view/edit",
+            keys,
+            index=default_index,
+            help="Tip: open multiple browser windows with ?store=A, ?store=B, ?store=C to compare side-by-side."
+        )
 
-cfg = store_options[store_label]
+    cfg = store_options[store_label]
 
-with col_refresh:
-    if st.button("🔄 Refresh product list"):
-        st.session_state.pop(f"products_{store_options[store_label]['key']}", None)
-        st.rerun()
-
+    with col_refresh:
+        if st.button("🔄 Refresh product list"):
+            st.session_state.pop(f"products_{store_options[store_label]['key']}", None)
+            st.rerun()
+    
     if not cfg["url"] or not cfg["token"]:
         st.error(f"Missing secrets for {cfg['label']}. Please set {cfg['label']} URL and token in Streamlit secrets.")
         st.stop()
@@ -531,6 +531,10 @@ state_key = f"products_{store_key}"
 if state_key not in st.session_state:
     with st.spinner(f"Loading products from {store_label}..."):
         st.session_state[state_key] = get_all_products()
+
+if st.button("🔄 Refresh product list"):
+    st.session_state.pop(state_key, None)
+    st.rerun()
 
 products = st.session_state.get(state_key, [])
 if not products:
