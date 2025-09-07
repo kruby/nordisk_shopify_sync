@@ -30,6 +30,48 @@ SYNC_KEY = "sync_fields"
 # =========================
 # Helpers
 # =========================
+
+# Cached, retry-safe fetch of product metafields for donor UI
+@st.cache_data(ttl=60, show_spinner=False)
+def get_product_metafields_with_retries(product_id: int, **kwargs):
+    """
+    Fetch all product metafields with pagination, retrying on 429s.
+    Cached for 60s to avoid hammering the API while the user clicks around.
+    """
+    if not product_id:
+        return []
+
+    backoffs = [0.6, 1.2, 2.0, 3.0]  # seconds
+    last_err = None
+
+    for attempt, wait in enumerate(backoffs, start=1):
+        try:
+            page = shopify.Metafield.find(resource="products", resource_id=product_id, limit=250, **kwargs)
+            items = []
+            while page:
+                items.extend(page)
+                try:
+                    page = page.next_page()
+                except Exception:
+                    break
+            return items
+        except ClientError as e:
+            msg = str(e)
+            last_err = e
+            # Most common: 429 Too Many Requests -> backoff and retry
+            if "429" in msg or "Too Many Requests" in msg:
+                time.sleep(wait)
+                continue
+            # Other client errors: stop early
+            break
+        except Exception as e:
+            last_err = e
+            break
+
+    # If we get here, retries failed
+    st.warning(f"Could not load donor metafields (temporary error). Try again in a moment. Details: {last_err}")
+    return []
+
 def _get_query_params():
     """Handle Streamlit's old/new query params APIs safely."""
     # Newer API
