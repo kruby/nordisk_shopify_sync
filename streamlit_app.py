@@ -537,10 +537,10 @@ if not products:
     st.warning(f"No products found in {store_label}.")
     st.stop()
 
-# --- Category & Product selectors (side by side) ---
+# --- Category & Product selectors (side by side) + Refresh button on the right ---
 product_types = sorted({p.product_type for p in products if getattr(p, "product_type", None)})
 
-col_cat, col_prod = st.columns([1, 2])
+col_cat, col_prod, col_refresh = st.columns([1, 2, 0.9])
 
 with col_cat:
     if not product_types:
@@ -566,6 +566,12 @@ with col_prod:
         key=f"product_select_{store_key}",
     )
 
+with col_refresh:
+    # Spacer to visually bottom-align the button with the selects (tweak if needed)
+    st.markdown("<div style='height: 2.6rem'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Refresh product list", key=f"refresh_btn_{store_key}", use_container_width=True):
+        st.session_state.pop(f"products_{store_key}", None)
+        st.rerun()
 
 show_only_sync = st.checkbox("🔁 Show only synced metafields", value=False)
 
