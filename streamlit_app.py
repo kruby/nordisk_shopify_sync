@@ -533,15 +533,35 @@ if not products:
     st.warning(f"No products found in {store_label}.")
     st.stop()
 
-product_types = sorted(set(p.product_type for p in products if getattr(p, "product_type", None)))
-selected_type = st.selectbox("Select a Product Category", product_types)
+# --- Category & Product selectors (side by side) ---
+product_types = sorted({p.product_type for p in products if getattr(p, "product_type", None)})
+
+col_cat, col_prod = st.columns([1, 2])
+
+with col_cat:
+    if not product_types:
+        st.warning("No product categories found.")
+        st.stop()
+    selected_type = st.selectbox(
+        "Select a Product Category",
+        product_types,
+        key=f"category_select_{store_key}",
+    )
+
+# Filter products by chosen category
 filtered_products = [p for p in products if p.product_type == selected_type]
 
-selected_product = st.selectbox(
-    "Select a Product",
-    filtered_products,
-    format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})"
-)
+with col_prod:
+    if not filtered_products:
+        st.warning("No products in this category.")
+        st.stop()
+    selected_product = st.selectbox(
+        "Select a Product",
+        filtered_products,
+        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+        key=f"product_select_{store_key}",
+    )
+
 
 show_only_sync = st.checkbox("🔁 Show only synced metafields", value=False)
 
