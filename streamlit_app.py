@@ -532,10 +532,6 @@ if state_key not in st.session_state:
     with st.spinner(f"Loading products from {store_label}..."):
         st.session_state[state_key] = get_all_products()
 
-if st.button("🔄 Refresh product list"):
-    st.session_state.pop(state_key, None)
-    st.rerun()
-
 products = st.session_state.get(state_key, [])
 if not products:
     st.warning(f"No products found in {store_label}.")
