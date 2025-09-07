@@ -565,8 +565,12 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
     # Fetch donor keys for selection (namespaced & plain)
     donor_metafields_list = list(find_product_metafields_all(getattr(donor_product, "id", 0))) if donor_product else []
     donor_keys_plain = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
-    donor_namespaced = sorted({f"{getattr(m, 'namespace', 'mf')}.{getattr(m, 'key', '')}" for m in donor_metafields_list if getattr(m, "key", "")})
+    donor_namespaced = sorted({
+        f"{getattr(m, 'namespace', 'mf')}.{getattr(m, 'key', '')}"
+        for m in donor_metafields_list if getattr(m, "key", "")
+    })
 
+    # Advanced options
     with st.expander("Advanced copy options", expanded=False):
         ns_filter_text = st.text_input(
             "Namespace filter (comma-separated, leave blank for all)",
@@ -605,10 +609,14 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"dry_run_{store_key}",
         )
 
-        if donor_namespaced:
-            st.caption("Donor has the following namespaced keys available:")
-            st.code("\n".join(donor_namespaced), language="text")
+    # Always-visible list of donor namespaced keys
+    if donor_namespaced:
+        st.caption("Donor has the following namespaced keys available:")
+        st.code("\n".join(donor_namespaced), language="text")
+    else:
+        st.caption("Donor has no metafields (or none fetched yet).")
 
+    # Action button
     col_btn, _ = st.columns([1, 3])
     with col_btn:
         copy_clicked = st.button("➡️ Copy metafields from donor → receiver", type="primary", use_container_width=True)
@@ -638,10 +646,6 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                     for line in result["logs"]:
                         st.write(line)
 
-
-if donor_namespaced:
-    st.caption("Donor has the following namespaced keys available:")
-    st.code("\n".join(donor_namespaced), language="text")
 
 # ---------- Info & Actions ----------
 product_save_logs = []
