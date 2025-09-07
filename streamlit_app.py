@@ -563,7 +563,7 @@ with col_prod:
 
 with col_refresh:
     # Spacer to visually bottom-align the button with the selects (tweak if needed)
-    st.markdown("<div style='height: 2.6rem'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 1.8rem'></div>", unsafe_allow_html=True)
     if st.button("🔄 Refresh product list", key=f"refresh_btn_{store_key}", use_container_width=True):
         st.session_state.pop(f"products_{store_key}", None)
         st.rerun()
