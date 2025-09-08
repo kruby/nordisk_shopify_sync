@@ -741,17 +741,17 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             if k not in key_to_example:
                 key_to_example[k] = _example_from_value(getattr(m, "value", None))
 
-        # Build DataFrame (columns MUST match column_config)
+        # Build DataFrame with desired column order
         exclude_rows = [
             {
+                "namespace": ", ".join(sorted(list(nss))),
                 "key": k,
-                "namespaces": ", ".join(sorted(list(nss))),
                 "example": key_to_example.get(k, ""),
                 "exclude": False,
             }
             for k, nss in sorted(key_to_namespaces.items(), key=lambda kv: kv[0].lower())
         ]
-        df_exclude_src = pd.DataFrame(exclude_rows, columns=["key", "namespaces", "example", "exclude"])
+        df_exclude_src = pd.DataFrame(exclude_rows, columns=["namespace", "key", "example", "exclude"])
 
         st.caption("Tick any **keys** you want to exclude from copying (applies to product & variant copies).")
         df_exclude = st.data_editor(
@@ -760,10 +760,10 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             use_container_width=True,
             key=f"exclude_keys_editor_adv_{store_key}",
             column_config={
-                "exclude": st.column_config.CheckboxColumn("Exclude"),
+                "namespace": st.column_config.TextColumn("Namespace(s)", disabled=True),
                 "key": st.column_config.TextColumn("Key", disabled=True),
-                "namespaces": st.column_config.TextColumn("Namespaces (for reference)", disabled=True),
                 "example": st.column_config.TextColumn("Example from donor", disabled=True),
+                "exclude": st.column_config.CheckboxColumn("Exclude"),
             },
         )
         
