@@ -669,7 +669,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             "Namespace filter (comma-separated, leave blank for all)",
             value="",
             help="Example: custom, seo, my_namespace",
-            key=f"ns_filter_adv_{store_key}",   # ← unique key
+            key=f"ns_filter_adv_{store_key}",
         )
         namespace_filter = [s.strip() for s in ns_filter_text.split(",") if s.strip()] or None
 
@@ -677,25 +677,25 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             "Overwrite existing receiver metafields",
             value=False,
             help="If unchecked, existing (namespace,key) pairs on the receiver are not changed.",
-            key=f"overwrite_adv_{store_key}",   # ← unique key
+            key=f"overwrite_adv_{store_key}",
         )
 
-        # Define this BEFORE the exclude table
+        # Define BEFORE building the exclude table
         only_synced_keys = st.checkbox(
             "Copy only keys marked for sync on donor",
             value=False,
             help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
-            key=f"only_synced_adv_{store_key}",  # ← unique key
+            key=f"only_synced_adv_{store_key}",
         )
 
         dry_run = st.checkbox(
             "Dry run (no writes)",
             value=False,
             help="Preview what would be created/updated without saving anything.",
-            key=f"dry_run_adv_{store_key}",       # ← unique key
+            key=f"dry_run_adv_{store_key}",
         )
 
-        # 2) Build the EXCLUDE table (checkboxes)
+        # 2) Build the EXCLUDE table (include donor examples)
         donor_mfs = donor_metafields_list if (donor_product and donor_metafields_list) else []
 
         ns_filter_set = set(namespace_filter) if namespace_filter else None
@@ -714,31 +714,54 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                 continue
             candidate_mfs.append(m)
 
-        # Collapse to distinct *key* names (copy routines match by key)
+        # Helper to make a short, readable example from a metafield value
+        def _example_from_value(v, maxlen=80):
+            try:
+                if v is None:
+                    return ""
+                # pretty json if possible
+                if isinstance(v, (dict, list)):
+                    s = json.dumps(v, ensure_ascii=False)
+                else:
+                    s = str(v)
+                s = s.replace("\n", " ").replace("\r", " ")
+                return (s[: maxlen - 1] + "…") if len(s) > maxlen else s
+            except Exception:
+                return ""
+
+        # Collapse by key and collect namespaces + one example (first seen) per key
         key_to_namespaces = {}
+        key_to_example = {}
         for m in candidate_mfs:
             k = getattr(m, "key", "")
             ns = getattr(m, "namespace", "")
             if not k or not ns:
                 continue
             key_to_namespaces.setdefault(k, set()).add(ns)
+            if k not in key_to_example:
+                key_to_example[k] = _example_from_value(getattr(m, "value", None))
 
-        # Build DataFrame for the data_editor (columns must match column_config)
+        # Build DataFrame (columns MUST match column_config)
         exclude_rows = [
-            {"key": k, "namespaces": ", ".join(sorted(list(nss))), "exclude": False}
+            {
+                "key": k,
+                "namespaces": ", ".join(sorted(list(nss))),
+                "example": key_to_example.get(k, ""),
+                "exclude": False,
+            }
             for k, nss in sorted(key_to_namespaces.items(), key=lambda kv: kv[0].lower())
         ]
-        df_exclude_src = pd.DataFrame(exclude_rows, columns=["key", "namespaces", "exclude"])
+        df_exclude_src = pd.DataFrame(exclude_rows, columns=["key", "namespaces", "example", "exclude"])
 
         st.caption("Tick any **keys** you want to exclude from copying (applies to product & variant copies).")
         df_exclude = st.data_editor(
             df_exclude_src,
             hide_index=True,
             use_container_width=True,
-            key=f"exclude_keys_editor_adv_{store_key}",   # ← unique key
+            key=f"exclude_keys_editor_adv_{store_key}",
             column_config={
                 "key": st.column_config.TextColumn("Key", disabled=True),
-                "namespaces": st.column_config.TextColumn("Namespaces (for reference)", disabled=True),
+                "example": st.column_config.TextColumn("Example from donor", disabled=True),
                 "exclude": st.column_config.CheckboxColumn("Exclude"),
             },
         )
