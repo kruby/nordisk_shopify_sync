@@ -664,6 +664,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
     })
 
     with st.expander("Advanced copy options", expanded=False):
+        # 1) Filters & flags
         ns_filter_text = st.text_input(
             "Namespace filter (comma-separated, leave blank for all)",
             value="",
@@ -679,7 +680,8 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"overwrite_{store_key}",
         )
 
-        only_synced_keys = st.checkbox(   # ✅ define this first
+        # IMPORTANT: define this before building the exclude table
+        only_synced_keys = st.checkbox(
             "Copy only keys marked for sync on donor",
             value=False,
             help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
@@ -693,40 +695,45 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"dry_run_{store_key}",
         )
 
-        # ✅ Now build the exclude table here (after only_synced_keys exists)
-        donor_sync_keys_set = set(get_sync_keys(donor_product)) if only_synced_keys else None
-        ...
-        df_exclude = st.data_editor(...)
+        # 2) Build the EXCLUDE table (checkboxes)
+        #    Use previously-fetched donor_metafields_list if available; otherwise empty.
+        donor_mfs = donor_metafields_list if (donor_product and donor_metafields_list) else []
 
-        # Build the candidate donor keys based on current filters (namespace + only_synced)
-        ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
-        donor_sync_keys_set = set(get_sync_keys(donor_product)) if only_synced_keys else None
+        ns_filter_set = set(namespace_filter) if namespace_filter else None
+        donor_sync_keys_set = set(get_sync_keys(donor_product)) if (donor_product and only_synced_keys) else None
 
+        # Filter donor metafields by namespace and "only synced" (if enabled)
         candidate_mfs = []
-        for m in donor_metafields_list:
+        for m in donor_mfs:
             k = getattr(m, "key", None)
             ns = getattr(m, "namespace", None)
             if not k or not ns:
                 continue
-            if ns_filter and ns not in ns_filter:
+            if ns_filter_set and ns not in ns_filter_set:
                 continue
             if donor_sync_keys_set is not None and k not in donor_sync_keys_set:
                 continue
             candidate_mfs.append(m)
 
-        # Collapse to distinct *key* names (copy routines filter by key, not namespace)
+        # Collapse to distinct *key* names (copy routines match by key)
         key_to_namespaces = {}
         for m in candidate_mfs:
-            key_to_namespaces.setdefault(m.key, set()).add(m.namespace)
+            k = getattr(m, "key", "")
+            ns = getattr(m, "namespace", "")
+            if not k or not ns:
+                continue
+            key_to_namespaces.setdefault(k, set()).add(ns)
 
+        # Build DataFrame for the data_editor (must match column_config keys)
         exclude_rows = [
             {"key": k, "namespaces": ", ".join(sorted(list(nss))), "exclude": False}
             for k, nss in sorted(key_to_namespaces.items(), key=lambda kv: kv[0].lower())
         ]
+        df_exclude_src = pd.DataFrame(exclude_rows, columns=["key", "namespaces", "exclude"])
 
         st.caption("Tick any **keys** you want to exclude from copying (applies to product & variant copies).")
         df_exclude = st.data_editor(
-            pd.DataFrame(exclude_rows),
+            df_exclude_src,
             hide_index=True,
             use_container_width=True,
             key=f"exclude_keys_editor_{store_key}",
