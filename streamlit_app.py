@@ -679,13 +679,24 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"overwrite_{store_key}",
         )
 
-        # st.caption("Select specific keys (by key name, not namespace) or leave empty to copy all keys in the chosen namespaces.")
-#         keys_to_copy = st.multiselect(
-#             "Keys to copy",
-#             donor_keys_plain,
-#             default=[],
-#             key=f"keys_to_copy_{store_key}",
-#         )
+        only_synced_keys = st.checkbox(   # ✅ define this first
+            "Copy only keys marked for sync on donor",
+            value=False,
+            help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
+            key=f"only_synced_{store_key}",
+        )
+
+        dry_run = st.checkbox(
+            "Dry run (no writes)",
+            value=False,
+            help="Preview what would be created/updated without saving anything.",
+            key=f"dry_run_{store_key}",
+        )
+
+        # ✅ Now build the exclude table here (after only_synced_keys exists)
+        donor_sync_keys_set = set(get_sync_keys(donor_product)) if only_synced_keys else None
+        ...
+        df_exclude = st.data_editor(...)
 
         # Build the candidate donor keys based on current filters (namespace + only_synced)
         ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
