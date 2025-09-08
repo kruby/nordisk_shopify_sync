@@ -511,6 +511,8 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
                     "option1": getattr(v, "option1", None) or None,
                     "option2": getattr(v, "option2", None) or None,
                     "option3": getattr(v, "option3", None) or None,
+                    "body_html": getattr(p, "body_html", None) or None,
+                    
                 }
                 vbase.update(metafields_dict(v, only_synced=only_synced))
                 variant_rows.append(vbase)
@@ -866,6 +868,7 @@ standard_fields_schema = [
     ("product_type", "Product Type"),
     ("tags", "Tags (comma-separated)"),
     ("status", "Status (active/draft/archived)"),
+    ("body_html", "Description (HTML)"),
 ]
 
 def _std_get_val(attr):
@@ -942,6 +945,8 @@ for variant in selected_product.variants:
                 "sync": key in variant_sync_keys,
                 "variant_id": variant.id,
                 "variant_title": variant.title,
+                "sku": getattr(variant, "sku", None),         # ← show SKU
+                "barcode": getattr(variant, "barcode", None), # ← optional, keep/remove as you wish
                 "product_id": selected_product.id,
                 "type": getattr(m, "type", "string"),
                 "metafield_obj": m
@@ -953,7 +958,19 @@ for variant in selected_product.variants:
 if variant_rows:
     st.markdown(f"### 🔍 Variant Metafields — {store_label}")
     df_v = pd.DataFrame(variant_rows).drop(columns=["metafield_obj"])
-    edited_df_v = st.data_editor(df_v, num_rows="fixed", use_container_width=True, key=f"variant_editor_{store_key}")
+
+    # Optional: make SKU non-editable in the data editor
+    edited_df_v = st.data_editor(
+        df_v,
+        num_rows="fixed",
+        use_container_width=True,
+        key=f"variant_editor_{store_key}",
+        column_config={
+            "sku": st.column_config.TextColumn(disabled=True),
+            "barcode": st.column_config.TextColumn(disabled=True),  # optional
+        },
+    )
+    
 else:
     edited_df_v = None
 
