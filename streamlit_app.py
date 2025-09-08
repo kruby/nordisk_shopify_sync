@@ -60,6 +60,18 @@ def get_product_metafields_with_retries(product_id: int, **kwargs):
     st.warning(f"Could not load donor metafields (temporary error). Try again. Details: {last_err}")
     return []
 
+def _first_sku_prefix(product):
+    """Return the first variant's SKU prefix (before '-') or empty string."""
+    try:
+        if not getattr(product, "variants", None):
+            return ""
+        first_sku = getattr(product.variants[0], "sku", "") or ""
+        if "-" in first_sku:
+            return first_sku.split("-")[0]
+        return first_sku
+    except Exception:
+        return ""
+
 def _get_query_params():
     """Handle Streamlit's old/new query params APIs safely."""
     try:
@@ -604,7 +616,7 @@ with col_prod:
     selected_product = st.selectbox(
         "Select a Product",
         filtered_products,
-        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})",
         key=f"product_select_{store_key}",
     )
 
@@ -631,8 +643,10 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         with col:
             rcv = st.selectbox(
                 f"Receiver {i} (copy TO)",
-                [None] + products,  # allow "none"
-                format_func=lambda p: "— None —" if p is None else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
+                [None] + products,
+                format_func=lambda p: (
+                    "— None —" if p is None else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
+                ),
                 key=f"receiver_select_{i}_{store_key}",
             )
             if rcv is not None:
