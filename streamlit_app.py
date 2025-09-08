@@ -636,16 +636,19 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         key=f"donor_select_{store_key}",
     )
 
-    # Up to 3 receivers in SAME store
-    colrcv = st.columns(3)
+    # Up to 4 receivers
+    colrcv = st.columns(4)   # ← was 3
     receiver_products = []
     for i, col in enumerate(colrcv, start=1):
         with col:
             rcv = st.selectbox(
                 f"Receiver {i} (copy TO)",
-                [None] + products,
+                [None] + products,  # allow "none"
                 format_func=lambda p: (
-                    "— None —" if p is None else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
+                    "— None —"
+                    if p is None
+                    else f"{getattr(p, 'title', '—')} "
+                         f"(ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
                 ),
                 key=f"receiver_select_{i}_{store_key}",
             )
