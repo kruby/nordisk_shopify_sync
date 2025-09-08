@@ -260,7 +260,7 @@ def copy_product_metafields(
     keys_to_copy=None,              # list[str] (without namespace) or None
     namespace_filter=None,          # str | list[str] | None
     overwrite=False,                # do not touch existing if False
-    only_synced=False,              # copy only keys marked for sync on donor
+    only_synced=False,              # kept for API compatibility; UI no longer uses this
     dry_run=False,                  # simulate changes without saving
 ):
     logs = []
@@ -361,7 +361,7 @@ def copy_variant_metafields(
     keys_to_copy=None,
     namespace_filter=None,
     overwrite=False,
-    only_synced=False,
+    only_synced=False,            # kept for API compatibility; UI no longer uses this
     dry_run=False,
 ):
     logs = []
@@ -524,7 +524,6 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
                     "option2": getattr(v, "option2", None) or None,
                     "option3": getattr(v, "option3", None) or None,
                     "body_html": getattr(p, "body_html", None) or None,
-                    
                 }
                 vbase.update(metafields_dict(v, only_synced=only_synced))
                 variant_rows.append(vbase)
@@ -637,7 +636,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
     )
 
     # Up to 4 receivers
-    colrcv = st.columns(4)   # ← was 3
+    colrcv = st.columns(4)
     receiver_products = []
     for i, col in enumerate(colrcv, start=1):
         with col:
@@ -680,14 +679,6 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"overwrite_adv_{store_key}",
         )
 
-        # Define BEFORE building the exclude table
-        only_synced_keys = st.checkbox(
-            "Copy only keys marked for sync on donor",
-            value=False,
-            help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
-            key=f"only_synced_adv_{store_key}",
-        )
-
         dry_run = st.checkbox(
             "Dry run (no writes)",
             value=False,
@@ -697,11 +688,9 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
 
         # 2) Build the EXCLUDE table (include donor examples)
         donor_mfs = donor_metafields_list if (donor_product and donor_metafields_list) else []
-
         ns_filter_set = set(namespace_filter) if namespace_filter else None
-        donor_sync_keys_set = set(get_sync_keys(donor_product)) if (donor_product and only_synced_keys) else None
 
-        # Filter donor metafields by namespace and "only synced" (if enabled)
+        # Filter donor metafields by namespace only (no "only synced" filtering anymore)
         candidate_mfs = []
         for m in donor_mfs:
             k = getattr(m, "key", None)
@@ -710,16 +699,12 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                 continue
             if ns_filter_set and ns not in ns_filter_set:
                 continue
-            if donor_sync_keys_set is not None and k not in donor_sync_keys_set:
-                continue
             candidate_mfs.append(m)
 
-        # Helper to make a short, readable example from a metafield value
         def _example_from_value(v, maxlen=80):
             try:
                 if v is None:
                     return ""
-                # pretty json if possible
                 if isinstance(v, (dict, list)):
                     s = json.dumps(v, ensure_ascii=False)
                 else:
@@ -729,7 +714,6 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             except Exception:
                 return ""
 
-        # Collapse by key and collect namespaces + one example (first seen) per key
         key_to_namespaces = {}
         key_to_example = {}
         for m in candidate_mfs:
@@ -766,20 +750,6 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                 "exclude": st.column_config.CheckboxColumn("Exclude"),
             },
         )
-        
-        only_synced_keys = st.checkbox(
-            "Copy only keys marked for sync on donor",
-            value=False,
-            help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
-            key=f"only_synced_{store_key}",
-        )
-
-        dry_run = st.checkbox(
-            "Dry run (no writes)",
-            value=False,
-            help="Preview what would be created/updated without saving anything.",
-            key=f"dry_run_{store_key}",
-        )
 
     st.markdown("---")
     copy_variants = st.checkbox(
@@ -790,7 +760,6 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
     )
     match_by = "title"  # we match variants by their Title (typically encodes color/size)
     st.caption("Variant matching is fixed to **Title** (e.g., size/colour).")
-    
 
     # Namespaced keys list (always visible)
     if donor_namespaced:
@@ -865,7 +834,6 @@ if copy_clicked:
                     keys_to_copy=keys_to_copy_final,      # ← use final keys (after exclusions)
                     namespace_filter=namespace_filter,
                     overwrite=overwrite_existing,
-                    only_synced=only_synced_keys,
                     dry_run=dry_run,
                 )
 
@@ -879,7 +847,6 @@ if copy_clicked:
                         keys_to_copy=keys_to_copy_final,     # ← use final keys (after exclusions)
                         namespace_filter=namespace_filter,
                         overwrite=overwrite_existing,
-                        only_synced=only_synced_keys,
                         dry_run=dry_run,
                     )
 
@@ -1057,8 +1024,8 @@ for variant in selected_product.variants:
                 "sync": key in variant_sync_keys,
                 "variant_id": variant.id,
                 "variant_title": variant.title,
-                "sku": getattr(variant, "sku", None),         # ← show SKU
-                "barcode": getattr(variant, "barcode", None), # ← optional, keep/remove as you wish
+                "sku": getattr(variant, "sku", None),
+                "barcode": getattr(variant, "barcode", None),
                 "product_id": selected_product.id,
                 "type": getattr(m, "type", "string"),
                 "metafield_obj": m
@@ -1071,7 +1038,6 @@ if variant_rows:
     st.markdown(f"### 🔍 Variant Metafields — {store_label}")
     df_v = pd.DataFrame(variant_rows).drop(columns=["metafield_obj"])
 
-    # Optional: make SKU non-editable in the data editor
     edited_df_v = st.data_editor(
         df_v,
         num_rows="fixed",
@@ -1079,10 +1045,9 @@ if variant_rows:
         key=f"variant_editor_{store_key}",
         column_config={
             "sku": st.column_config.TextColumn(disabled=True),
-            "barcode": st.column_config.TextColumn(disabled=True),  # optional
+            "barcode": st.column_config.TextColumn(disabled=True),
         },
     )
-    
 else:
     edited_df_v = None
 
