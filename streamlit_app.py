@@ -760,9 +760,10 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             use_container_width=True,
             key=f"exclude_keys_editor_adv_{store_key}",
             column_config={
-                "key": st.column_config.TextColumn("Key", disabled=True),
-                "example": st.column_config.TextColumn("Example from donor", disabled=True),
                 "exclude": st.column_config.CheckboxColumn("Exclude"),
+                "key": st.column_config.TextColumn("Key", disabled=True),
+                "namespaces": st.column_config.TextColumn("Namespaces (for reference)", disabled=True),
+                "example": st.column_config.TextColumn("Example from donor", disabled=True),
             },
         )
         
