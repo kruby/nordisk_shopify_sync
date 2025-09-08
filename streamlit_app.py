@@ -669,7 +669,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             "Namespace filter (comma-separated, leave blank for all)",
             value="",
             help="Example: custom, seo, my_namespace",
-            key=f"ns_filter_{store_key}",
+            key=f"ns_filter_adv_{store_key}",   # ← unique key
         )
         namespace_filter = [s.strip() for s in ns_filter_text.split(",") if s.strip()] or None
 
@@ -677,26 +677,25 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             "Overwrite existing receiver metafields",
             value=False,
             help="If unchecked, existing (namespace,key) pairs on the receiver are not changed.",
-            key=f"overwrite_{store_key}",
+            key=f"overwrite_adv_{store_key}",   # ← unique key
         )
 
-        # IMPORTANT: define this before building the exclude table
+        # Define this BEFORE the exclude table
         only_synced_keys = st.checkbox(
             "Copy only keys marked for sync on donor",
             value=False,
             help="Uses the donor's sync metafield (sync/sync_fields) to restrict which keys are copied.",
-            key=f"only_synced_{store_key}",
+            key=f"only_synced_adv_{store_key}",  # ← unique key
         )
 
         dry_run = st.checkbox(
             "Dry run (no writes)",
             value=False,
             help="Preview what would be created/updated without saving anything.",
-            key=f"dry_run_{store_key}",
+            key=f"dry_run_adv_{store_key}",       # ← unique key
         )
 
         # 2) Build the EXCLUDE table (checkboxes)
-        #    Use previously-fetched donor_metafields_list if available; otherwise empty.
         donor_mfs = donor_metafields_list if (donor_product and donor_metafields_list) else []
 
         ns_filter_set = set(namespace_filter) if namespace_filter else None
@@ -724,7 +723,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
                 continue
             key_to_namespaces.setdefault(k, set()).add(ns)
 
-        # Build DataFrame for the data_editor (must match column_config keys)
+        # Build DataFrame for the data_editor (columns must match column_config)
         exclude_rows = [
             {"key": k, "namespaces": ", ".join(sorted(list(nss))), "exclude": False}
             for k, nss in sorted(key_to_namespaces.items(), key=lambda kv: kv[0].lower())
@@ -736,7 +735,7 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             df_exclude_src,
             hide_index=True,
             use_container_width=True,
-            key=f"exclude_keys_editor_{store_key}",
+            key=f"exclude_keys_editor_adv_{store_key}",   # ← unique key
             column_config={
                 "key": st.column_config.TextColumn("Key", disabled=True),
                 "namespaces": st.column_config.TextColumn("Namespaces (for reference)", disabled=True),
