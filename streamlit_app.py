@@ -679,14 +679,53 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
             key=f"overwrite_{store_key}",
         )
 
-        st.caption("Select specific keys (by key name, not namespace) or leave empty to copy all keys in the chosen namespaces.")
-        keys_to_copy = st.multiselect(
-            "Keys to copy",
-            donor_keys_plain,
-            default=[],
-            key=f"keys_to_copy_{store_key}",
-        )
+        # st.caption("Select specific keys (by key name, not namespace) or leave empty to copy all keys in the chosen namespaces.")
+#         keys_to_copy = st.multiselect(
+#             "Keys to copy",
+#             donor_keys_plain,
+#             default=[],
+#             key=f"keys_to_copy_{store_key}",
+#         )
 
+        # Build the candidate donor keys based on current filters (namespace + only_synced)
+        ns_filter = set([namespace_filter]) if isinstance(namespace_filter, str) else (set(namespace_filter) if namespace_filter else None)
+        donor_sync_keys_set = set(get_sync_keys(donor_product)) if only_synced_keys else None
+
+        candidate_mfs = []
+        for m in donor_metafields_list:
+            k = getattr(m, "key", None)
+            ns = getattr(m, "namespace", None)
+            if not k or not ns:
+                continue
+            if ns_filter and ns not in ns_filter:
+                continue
+            if donor_sync_keys_set is not None and k not in donor_sync_keys_set:
+                continue
+            candidate_mfs.append(m)
+
+        # Collapse to distinct *key* names (copy routines filter by key, not namespace)
+        key_to_namespaces = {}
+        for m in candidate_mfs:
+            key_to_namespaces.setdefault(m.key, set()).add(m.namespace)
+
+        exclude_rows = [
+            {"key": k, "namespaces": ", ".join(sorted(list(nss))), "exclude": False}
+            for k, nss in sorted(key_to_namespaces.items(), key=lambda kv: kv[0].lower())
+        ]
+
+        st.caption("Tick any **keys** you want to exclude from copying (applies to product & variant copies).")
+        df_exclude = st.data_editor(
+            pd.DataFrame(exclude_rows),
+            hide_index=True,
+            use_container_width=True,
+            key=f"exclude_keys_editor_{store_key}",
+            column_config={
+                "key": st.column_config.TextColumn("Key", disabled=True),
+                "namespaces": st.column_config.TextColumn("Namespaces (for reference)", disabled=True),
+                "exclude": st.column_config.CheckboxColumn("Exclude"),
+            },
+        )
+        
         only_synced_keys = st.checkbox(
             "Copy only keys marked for sync on donor",
             value=False,
@@ -736,72 +775,87 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
 
     copy_clicked = st.button("➡️ Copy metafields from donor → receivers", type="primary", use_container_width=True, key=f"copy_btn_{store_key}")
 
-    if copy_clicked:
-        if not donor_product or not receiver_products:
-            st.warning("Pick a donor and at least one receiver product.")
-        else:
-            connect_to_store(store_cfg["url"], store_cfg["token"])
-            with st.spinner("Copying metafields..."):
+if copy_clicked:
+    # Collect excluded keys from the table
+    excluded_keys = set()
+    try:
+        if isinstance(df_exclude, pd.DataFrame) and not df_exclude.empty:
+            excluded_keys = {str(r["key"]) for _, r in df_exclude.iterrows() if bool(r.get("exclude", False))}
+    except Exception:
+        pass
 
-                # --- Title sanity check (donor) ---
-                b_blanks, b_dups = _variant_key_stats(donor_product, match_by)
-                if b_blanks:
-                    st.warning(f"Donor has {b_blanks} variant(s) with blank {match_by!r} — those won't copy.")
-                if b_dups:
-                    st.warning(f"Donor has duplicate {match_by!r} values: {', '.join(list(b_dups.keys())[:10])} …")
+    # Determine keys to copy: all candidate keys minus excluded
+    if 'key_to_namespaces' in locals() and key_to_namespaces:
+        keys_to_copy_final = [k for k in key_to_namespaces.keys() if k not in excluded_keys]
+    else:
+        # Fallback (no candidate filtering applied): derive from all donor metafields
+        all_keys = sorted({getattr(m, "key", "") for m in donor_metafields_list if getattr(m, "key", "")})
+        keys_to_copy_final = [k for k in all_keys if k and k not in excluded_keys]
 
-                for rcv in receiver_products:
-                    if rcv.id == donor_product.id:
-                        st.warning(f"Skipped receiver {rcv.id} — cannot be the same as donor.")
-                        continue
+    if not donor_product or not receiver_products:
+        st.warning("Pick a donor and at least one receiver product.")
+    else:
+        connect_to_store(store_cfg["url"], store_cfg["token"])
+        with st.spinner("Copying metafields..."):
 
-                    # SKU sanity for receiver
-                    # Title sanity for receiver
-                    r_blanks, r_dups = _variant_key_stats(rcv, match_by)
-                    if r_blanks:
-                        st.info(f"Receiver {rcv.id} has {r_blanks} blank {match_by!r} value(s) — unmatched variants will be skipped.")
-                    if r_dups:
-                        st.info(f"Receiver {rcv.id} has duplicate {match_by!r} values — last one will win for each duplicate key.")
+            # --- Title sanity check (donor) ---
+            b_blanks, b_dups = _variant_key_stats(donor_product, match_by)
+            if b_blanks:
+                st.warning(f"Donor has {b_blanks} variant(s) with blank {match_by!r} — those won't copy.")
+            if b_dups:
+                st.warning(f"Donor has duplicate {match_by!r} values: {', '.join(list(b_dups.keys())[:10])} …")
 
-                    # 1) Product metafields
-                    result = copy_product_metafields(
+            for rcv in receiver_products:
+                if rcv.id == donor_product.id:
+                    st.warning(f"Skipped receiver {rcv.id} — cannot be the same as donor.")
+                    continue
+
+                # Title sanity for receiver
+                r_blanks, r_dups = _variant_key_stats(rcv, match_by)
+                if r_blanks:
+                    st.info(f"Receiver {rcv.id} has {r_blanks} blank {match_by!r} value(s) — unmatched variants will be skipped.")
+                if r_dups:
+                    st.info(f"Receiver {rcv.id} has duplicate {match_by!r} values — last one will win for each duplicate key.")
+
+                # 1) Product metafields
+                result = copy_product_metafields(
+                    donor_product=donor_product,
+                    receiver_product=rcv,
+                    keys_to_copy=keys_to_copy_final,      # ← use final keys (after exclusions)
+                    namespace_filter=namespace_filter,
+                    overwrite=overwrite_existing,
+                    only_synced=only_synced_keys,
+                    dry_run=dry_run,
+                )
+
+                # 2) Variant metafields (match by Title)
+                v_result = None
+                if copy_variants:
+                    v_result = copy_variant_metafields(
                         donor_product=donor_product,
                         receiver_product=rcv,
-                        keys_to_copy=keys_to_copy or None,
+                        match_by=match_by,                  # "title"
+                        keys_to_copy=keys_to_copy_final,     # ← use final keys (after exclusions)
                         namespace_filter=namespace_filter,
                         overwrite=overwrite_existing,
                         only_synced=only_synced_keys,
                         dry_run=dry_run,
                     )
 
-                    # 2) Variant metafields (by SKU)
-                    v_result = None
-                    if copy_variants:
-                        v_result = copy_variant_metafields(
-                            donor_product=donor_product,
-                            receiver_product=rcv,
-                            match_by=match_by, # Title
-                            keys_to_copy=keys_to_copy or None,
-                            namespace_filter=namespace_filter,
-                            overwrite=overwrite_existing,
-                            only_synced=only_synced_keys,
-                            dry_run=dry_run,
-                        )
+                if dry_run:
+                    st.info(f"[DRY RUN] Receiver {rcv.id}: no changes saved.")
 
-                    if dry_run:
-                        st.info(f"[DRY RUN] Receiver {rcv.id}: no changes saved.")
+                st.success(f"Receiver {rcv.id}: {result['summary']}")
+                if v_result:
+                    st.success(f"Receiver {rcv.id}: {v_result['summary']}")
 
-                    st.success(f"Receiver {rcv.id}: {result['summary']}")
+                with st.expander(f"Details for receiver {rcv.id}", expanded=False):
+                    for line in result["logs"]:
+                        st.write(line)
                     if v_result:
-                        st.success(f"Receiver {rcv.id}: {v_result['summary']}")
-
-                    with st.expander(f"Details for receiver {rcv.id}", expanded=False):
-                        for line in result["logs"]:
+                        st.markdown("---")
+                        for line in v_result["logs"]:
                             st.write(line)
-                        if v_result:
-                            st.markdown("---")
-                            for line in v_result["logs"]:
-                                st.write(line)
 
 # ---------- EXPORT UI ----------
 with st.expander("📤 Export this Category", expanded=False):
