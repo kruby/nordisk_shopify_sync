@@ -629,11 +629,11 @@ with col_refresh:
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-    donor_product = st.selectbox(
-        "Donor product (copy FROM)",
-        products,
-        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')})",
-        key=f"donor_select_{store_key}",
+    selected_product = st.selectbox(
+        "Select a Product",
+        filtered_products,
+        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})",
+        key=f"product_select_{store_key}",
     )
 
     # Up to 3 receivers in SAME store
