@@ -129,17 +129,17 @@ def connect_to_store(shop_url=None, token=None):
 @st.cache_data(show_spinner=False)
 def get_all_products_cached(shop_url, token):
     url = shop_url if str(shop_url).startswith("https://") else f"https://{shop_url}"
-    session = shopify.Session(url, API_VERSION, token)
-    shopify.ShopifyResource.activate_session(session)
-    all_products = []
-    page = shopify.Product.find(limit=250)
-    while page:
-        all_products.extend(page)
-        try:
-            page = page.next_page()
-        except Exception:
-            break
-    return all_products
+    # Use a TEMP session so later calls aren't left without a site
+    with shopify.Session.temp(url, API_VERSION, token):
+        all_products = []
+        page = shopify.Product.find(limit=250)
+        while page:
+            all_products.extend(page)
+            try:
+                page = page.next_page()
+            except Exception:
+                break
+        return all_products
 
 def get_all_products():
     return get_all_products_cached(store_cfg["url"], store_cfg["token"])
@@ -302,8 +302,8 @@ def copy_product_metafields(
                 try:
                     if getattr(receiver_existing, "type", None) in (None, "", "string"):
                         receiver_existing.type = mtype
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
                 ok = receiver_existing.save()
             else:
                 mf = shopify.Metafield()
@@ -527,10 +527,9 @@ def build_category_export(products_in_type, only_synced=False, include_variants=
                 }
                 vbase.update(metafields_dict(v, only_synced=only_synced))
                 variant_rows.append(vbase)
-                time.sleep(0.4)
+                # (no sleeps during reads)
 
-        if idx % 10 == 0:
-            time.sleep(0.2)
+        # (no per-10 pacing during reads)
 
     products_df = pd.DataFrame(product_rows) if product_rows else pd.DataFrame()
     variants_df = pd.DataFrame(variant_rows) if variant_rows else pd.DataFrame()
@@ -619,10 +618,48 @@ with col_prod:
         key=f"product_select_{store_key}",
     )
 
+    # ---- Per-product caches (avoid re-fetching on every rerun) ----
+    def _prod_mf_key(pid): return f"mf_prod_{pid}"
+    def _var_mf_key(pid):  return f"mf_var_map_{pid}"
+    def _prod_sync_key(pid): return f"sync_prod_keys_{pid}"
+    def _var_sync_key(pid):  return f"sync_var_keys_{pid}"
+
+    _product_id = int(selected_product.id)
+
+    # Product metafields once per product view
+    if _prod_mf_key(_product_id) not in st.session_state:
+        st.session_state[_prod_mf_key(_product_id)] = find_product_metafields_all(_product_id)
+
+    # Variant metafields once per product view
+    if _var_mf_key(_product_id) not in st.session_state:
+        _vm = {}
+        for _v in selected_product.variants:
+            _vm[int(_v.id)] = find_variant_metafields_all(int(_v.id))
+        st.session_state[_var_mf_key(_product_id)] = _vm
+
+    # Sync-key lists once per product view
+    if _prod_sync_key(_product_id) not in st.session_state:
+        st.session_state[_prod_sync_key(_product_id)] = get_sync_keys(selected_product)
+    if _var_sync_key(_product_id) not in st.session_state:
+        st.session_state[_var_sync_key(_product_id)] = {
+            int(_v.id): get_sync_keys(_v) for _v in selected_product.variants
+        }
+
+    # Handy locals
+    mfs_product      = st.session_state[_prod_mf_key(_product_id)]          # list[Metafield]
+    mfs_variant_map  = st.session_state[_var_mf_key(_product_id)]           # dict[variant_id]->list[Metafield]
+    cached_sync_prod = st.session_state[_prod_sync_key(_product_id)]        # list[str]
+    cached_sync_vars = st.session_state[_var_sync_key(_product_id)]         # dict[variant_id]->list[str]
+
 with col_refresh:
     st.markdown("<div style='height: 1.8rem'></div>", unsafe_allow_html=True)
     if st.button("🔄 Refresh product list", key=f"refresh_btn_{store_key}", use_container_width=True):
+        # drop product list cache
         st.session_state.pop(f"products_{store_key}", None)
+        # drop any per-product caches for a clean reload
+        for k in list(st.session_state.keys()):
+            if k.startswith("mf_prod_") or k.startswith("mf_var_map_") or k.startswith("sync_prod_keys_") or k.startswith("sync_var_keys_"):
+                st.session_state.pop(k, None)
         st.rerun()
 
 # ---------- Copy Product Metafields UI ----------
@@ -982,8 +1019,8 @@ show_only_sync = st.checkbox(
 
 # ---------- Product Metafields ----------
 product_fields = []
-sync_keys_for_product = get_sync_keys(selected_product)
-existing_fields = {m.key: m for m in find_product_metafields_all(selected_product.id)}
+sync_keys_for_product = cached_sync_prod
+existing_fields = {m.key: m for m in mfs_product}
 for key, m in existing_fields.items():
     if show_only_sync and key not in sync_keys_for_product:
         continue
@@ -1009,12 +1046,15 @@ variant_map = {}
 variant_sync_map = {}
 
 for variant in selected_product.variants:
-    time.sleep(0.6)
     try:
         variant_map[variant.id] = variant
-        variant_sync_keys = get_sync_keys(variant)
-        variant_sync_map[variant.id] = variant_sync_keys
-        existing_fields = {m.key: m for m in find_variant_metafields_all(variant.id)}
+        vid = int(variant.id)
+        variant_sync_keys = cached_sync_vars.get(vid, [])
+        variant_sync_map[vid] = variant_sync_keys
+
+        mfs_for_variant = mfs_variant_map.get(vid) or find_variant_metafields_all(vid)
+        existing_fields = {m.key: m for m in mfs_for_variant}
+
         for key, m in existing_fields.items():
             if show_only_sync and key not in variant_sync_keys:
                 continue
@@ -1127,6 +1167,7 @@ if save_clicked:
                 except Exception as e:
                     product_save_logs.append(f"❌ Error saving product metafield '{key}': {e}")
         if save_sync_keys(selected_product, updated_product_sync_keys):
+            st.session_state[_prod_sync_key(_product_id)] = updated_product_sync_keys
             product_save_logs.append(f"✅ Saved product sync fields: {', '.join(updated_product_sync_keys)}")
 
     # --- Save variant metafields & sync keys ---
@@ -1160,6 +1201,15 @@ if save_clicked:
                         variant_save_logs.append(f"❌ Error saving variant {variant_id} metafield '{key}': {e}")
             if save_sync_keys(variant, keys_to_sync):
                 variant_save_logs.append(f"✅ Saved variant {variant_id} sync fields: {', '.join(keys_to_sync)}")
+                cached_sync_vars[variant_id] = keys_to_sync
+                st.session_state[_var_sync_key(_product_id)] = cached_sync_vars
+
+    # Invalidate caches so next render reflects fresh data
+    st.session_state.pop(_prod_mf_key(_product_id), None)
+    st.session_state.pop(_var_mf_key(_product_id), None)
+    st.session_state.pop(_prod_sync_key(_product_id), None)
+    st.session_state.pop(_var_sync_key(_product_id), None)
+
 
 # --- Apply Sync (within selected store) ---
 if apply_sync_clicked:
