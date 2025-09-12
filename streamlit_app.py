@@ -302,8 +302,8 @@ def copy_product_metafields(
                 try:
                     if getattr(receiver_existing, "type", None) in (None, "", "string"):
                         receiver_existing.type = mtype
-                    except Exception:
-                        pass
+                except Exception:
+                    pass
                 ok = receiver_existing.save()
             else:
                 mf = shopify.Metafield()
