@@ -14,16 +14,6 @@ from update_app import sync_product_fields
 # =========================
 st.set_page_config(layout="wide")
 
-st.markdown("""
-<style>
-/* Kill the faint grey echo under selectboxes (BaseWeb status/live region) */
-.stSelectbox [role="status"],
-.stSelectbox [aria-live="polite"] {
-  display: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 SHOP_URL = st.secrets["STORE_A_URL"]
 TOKEN = st.secrets["TOKEN_A"]
 
