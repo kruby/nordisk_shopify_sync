@@ -665,12 +665,21 @@ with col_refresh:
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-    donor_product = st.selectbox(
-        "Donor product (copy FROM)",
-        products,
-        format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})",
-        key=f"donor_select_{store_key}",
-    )
+# Default donor = the product chosen above
+donor_idx = next(
+    (i for i, p in enumerate(products) if getattr(p, "id", None) == getattr(selected_product, "id", None)),
+    0
+)
+
+donor_product = st.selectbox(
+    "Donor product (copy FROM)",
+    products,
+    index=donor_idx,
+    format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})",
+    # key includes selected product id so the widget is rebuilt when selection changes,
+    # ensuring the default donor follows the selected product.
+    key=f"donor_select_{store_key}_{getattr(selected_product, 'id', 'x')}",
+)
 
     # Up to 4 receivers
     colrcv = st.columns(4)
