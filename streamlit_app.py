@@ -599,11 +599,25 @@ with col_cat:
     if not product_types:
         st.warning("No product categories found.")
         st.stop()
+
     selected_type = st.selectbox(
         "Select a Product Category",
         product_types,
         key=f"category_select_{store_key}",
     )
+
+    # ---- one-time rerun to remove first-render ghost line ----
+    flag_key = f"cat_first_select_done_{store_key}"
+    prev_key = f"cat_prev_selected_{store_key}"
+    if flag_key not in st.session_state:
+        st.session_state[flag_key] = False
+    prev_val = st.session_state.get(prev_key)
+
+    if selected_type != prev_val:
+        st.session_state[prev_key] = selected_type
+        if not st.session_state[flag_key] and selected_type is not None:
+            st.session_state[flag_key] = True
+            st.rerun()
 
 filtered_products = [p for p in products if p.product_type == selected_type]
 
