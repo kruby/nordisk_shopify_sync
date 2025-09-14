@@ -599,10 +599,17 @@ with col_cat:
     if not product_types:
         st.warning("No product categories found.")
         st.stop()
+
+    # Render our own label to avoid Streamlit’s grey echo
+    st.markdown("**Select a Product Category**")
+
     selected_type = st.selectbox(
-        "Select a Product Category",
+        "",  # no label
         product_types,
         key=f"category_select_{store_key}",
+        label_visibility="collapsed",
+        # optional: a placeholder when nothing picked yet
+        placeholder="Choose a category…"
     )
 
 filtered_products = [p for p in products if p.product_type == selected_type]
