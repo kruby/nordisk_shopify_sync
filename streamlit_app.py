@@ -679,21 +679,49 @@ with col_refresh:
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-    # Default donor = the product chosen above
+    # --- Receiver pool filtered by same title as donor ---
+    def _norm_title(s: str) -> str:
+        return (s or "").strip().lower()
+
     donor_idx = next(
         (i for i, p in enumerate(products) if getattr(p, "id", None) == getattr(selected_product, "id", None)),
         0
     )
-
     donor_product = st.selectbox(
         "Donor product (copy FROM)",
         products,
         index=donor_idx,
         format_func=lambda p: f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})",
-        # key includes selected product id so the widget is rebuilt when selection changes,
-        # ensuring the default donor follows the selected product.
         key=f"donor_select_{store_key}_{getattr(selected_product, 'id', 'x')}",
     )
+
+    # Receiver filter toggle (defaults to only same-title)
+    show_all_receivers = st.checkbox(
+        "Show all products in receivers (instead of only same title)",
+        value=False,
+        key=f"rcv_show_all_{store_key}_{getattr(donor_product, 'id', 'x')}",
+        help="When OFF, receivers will only list products with the exact same Title as the donor."
+    )
+
+    # Build the receiver pool
+    if donor_product:
+        donor_title_norm = _norm_title(getattr(donor_product, "title", ""))
+    else:
+        donor_title_norm = ""
+
+    if show_all_receivers:
+        receiver_pool = [p for p in products if getattr(p, "id", None) != getattr(donor_product, "id", None)]
+    else:
+        receiver_pool = [
+            p for p in products
+            if getattr(p, "id", None) != getattr(donor_product, "id", None)
+            and _norm_title(getattr(p, "title", "")) == donor_title_norm
+        ]
+
+    # Fallback if no exact matches found
+    if not receiver_pool and not show_all_receivers:
+        st.info("No exact same-title matches found. Showing all products instead.")
+        receiver_pool = [p for p in products if getattr(p, "id", None) != getattr(donor_product, "id", None)]
 
     # Up to 4 receivers
     colrcv = st.columns(4)
@@ -702,14 +730,13 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         with col:
             rcv = st.selectbox(
                 f"Receiver {i} (copy TO)",
-                [None] + products,  # allow "none"
+                [None] + receiver_pool,  # allow “none”
                 format_func=lambda p: (
                     "— None —"
-                    if p is None
-                    else f"{getattr(p, 'title', '—')} "
-                         f"(ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
+                    if p is None else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
                 ),
-                key=f"receiver_select_{i}_{store_key}",
+                # include donor id in key so the list refreshes when donor changes
+                key=f"receiver_select_{i}_{store_key}_{getattr(donor_product, 'id', 'x')}",
             )
             if rcv is not None:
                 receiver_products.append(rcv)
