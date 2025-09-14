@@ -14,6 +14,16 @@ from update_app import sync_product_fields
 # =========================
 st.set_page_config(layout="wide")
 
+st.markdown("""
+<style>
+/* Kill the faint grey echo under selectboxes (BaseWeb status/live region) */
+.stSelectbox [role="status"],
+.stSelectbox [aria-live="polite"] {
+  display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 SHOP_URL = st.secrets["STORE_A_URL"]
 TOKEN = st.secrets["TOKEN_A"]
 
@@ -599,14 +609,10 @@ with col_cat:
     if not product_types:
         st.warning("No product categories found.")
         st.stop()
-
-    st.markdown("**Select a Product Category**")
     selected_type = st.selectbox(
-        "",  # no built-in label
+        "Select a Product Category",
         product_types,
         key=f"category_select_{store_key}",
-        label_visibility="collapsed",
-        placeholder="Choose a category…",
     )
 
 filtered_products = [p for p in products if p.product_type == selected_type]
