@@ -679,10 +679,7 @@ with col_refresh:
 # ---------- Copy Product Metafields UI ----------
 with st.expander("🧬 Copy Product Metafields", expanded=False):
 
-    # --- Receiver pool filtered by same title as donor ---
-    def _norm_title(s: str) -> str:
-        return (s or "").strip().lower()
-
+    # --- Donor defaults to the product chosen above ---
     donor_idx = next(
         (i for i, p in enumerate(products) if getattr(p, "id", None) == getattr(selected_product, "id", None)),
         0
@@ -695,32 +692,40 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         key=f"donor_select_{store_key}_{getattr(selected_product, 'id', 'x')}",
     )
 
-    # Receiver filter toggle (defaults to only same-title)
+    # --- Helper: title prefix up to and INCLUDING the first '-' ---
+    def _title_prefix_with_dash(s: str) -> str:
+        s = (s or "").strip()
+        if not s:
+            return ""
+        i = s.find("-")
+        return s[: i + 1] if i != -1 else s  # include the dash if present
+
+    def _norm(s: str) -> str:
+        return (s or "").strip().lower()
+
+    # Receiver filter toggle (can widen the list if needed)
     show_all_receivers = st.checkbox(
-        "Show all products in receivers (instead of only same title)",
+        "Show all products in receivers",
         value=False,
         key=f"rcv_show_all_{store_key}_{getattr(donor_product, 'id', 'x')}",
-        help="When OFF, receivers will only list products with the exact same Title as the donor."
+        help="When OFF, receivers only list products whose title prefix (up to the first dash, incl. the dash) matches the donor.",
     )
 
-    # Build the receiver pool
-    if donor_product:
-        donor_title_norm = _norm_title(getattr(donor_product, "title", ""))
-    else:
-        donor_title_norm = ""
+    # Build receiver pool based on donor's title prefix-with-dash
+    donor_prefix_norm = _norm(_title_prefix_with_dash(getattr(donor_product, "title", ""))) if donor_product else ""
 
-    if show_all_receivers:
+    if show_all_receivers or not donor_product:
         receiver_pool = [p for p in products if getattr(p, "id", None) != getattr(donor_product, "id", None)]
     else:
         receiver_pool = [
             p for p in products
             if getattr(p, "id", None) != getattr(donor_product, "id", None)
-            and _norm_title(getattr(p, "title", "")) == donor_title_norm
+            and _norm(_title_prefix_with_dash(getattr(p, "title", ""))) == donor_prefix_norm
         ]
 
-    # Fallback if no exact matches found
+    # Fallback if no matches
     if not receiver_pool and not show_all_receivers:
-        st.info("No exact same-title matches found. Showing all products instead.")
+        st.info("No same-prefix (up to first dash) matches found. Showing all products instead.")
         receiver_pool = [p for p in products if getattr(p, "id", None) != getattr(donor_product, "id", None)]
 
     # Up to 4 receivers
@@ -730,12 +735,13 @@ with st.expander("🧬 Copy Product Metafields", expanded=False):
         with col:
             rcv = st.selectbox(
                 f"Receiver {i} (copy TO)",
-                [None] + receiver_pool,  # allow “none”
+                [None] + receiver_pool,
                 format_func=lambda p: (
                     "— None —"
-                    if p is None else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
+                    if p is None
+                    else f"{getattr(p, 'title', '—')} (ID: {getattr(p, 'id', '—')}, SKU: {_first_sku_prefix(p)})"
                 ),
-                # include donor id in key so the list refreshes when donor changes
+                # include donor id so the list refreshes when donor changes
                 key=f"receiver_select_{i}_{store_key}_{getattr(donor_product, 'id', 'x')}",
             )
             if rcv is not None:
